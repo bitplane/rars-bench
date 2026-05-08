@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# bench-specific: never commit corpora or result DBs
+corpora
+!corpora/.gitkeep
+results/*
+!results/.gitkeep
+# reference RAR binaries — copied locally, never pushed
+_refs/*
+!_refs/**/.gitkeep

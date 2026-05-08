@@ -1,0 +1,228 @@
+"""rars-bench CLI entry point — `sweep` and `triage` subcommands."""
+import argparse
+import os
+import shutil
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from . import triage as _triage
+from .drivers import Rar1402Driver, RarsDriver, WineRarDriver
+from .formats.rar30 import RAR30_DEFAULT
+from .formats.rar40 import RAR40_DEFAULT
+from .formats.rar50 import RAR50_DEFAULT
+from .formats.rar70 import RAR70_DEFAULT
+from .formats.rar29 import RAR29_DEFAULT
+from .runner import sweep
+from .variants import RAR14_SLICE
+
+
+_VARIANT_SETS: dict[str, dict[str, list]] = {
+    "rar14": {"default": RAR14_SLICE},
+    "rar29": {"default": RAR29_DEFAULT},
+    "rar30": {"default": RAR30_DEFAULT},
+    "rar40": {"default": RAR40_DEFAULT},
+    "rar50": {"default": RAR50_DEFAULT},
+    "rar70": {"default": RAR70_DEFAULT},
+}
+
+
+@dataclass(frozen=True)
+class _WineOracle:
+    prefix_subdir: str                              # under _refs/wineprefixes/
+    rar_relpath: str                                # under prefix
+    version: str
+
+    def relative_exe(self) -> Path:
+        return Path(self.rar_relpath)
+
+
+# Map format -> wine oracle config. Each entry resolves to a WineRarDriver
+# in _build_oracle.
+_WINE_ORACLES: dict[str, _WineOracle] = {
+    "rar29": _WineOracle("winrar290", "drive_c/Program Files (x86)/WinRAR/Rar.exe", "2.90"),
+    "rar30": _WineOracle("winrar300", "drive_c/Program Files (x86)/WinRAR/Rar.exe", "3.00"),
+    "rar40": _WineOracle("winrar420", "drive_c/Program Files (x86)/WinRAR/Rar.exe", "4.20"),
+    "rar50": _WineOracle("winrar602", "drive_c/Program Files (x86)/WinRAR/Rar.exe", "6.02"),
+    # winrar721 is 64-bit, so no `(x86)`.
+    "rar70": _WineOracle("winrar721", "drive_c/Program Files/WinRAR/Rar.exe", "7.21"),
+}
+
+
+def _build_oracle(fmt: str, args: argparse.Namespace):
+    if fmt == "rar14":
+        if not args.rar1402_bin.is_file():
+            return None, (
+                f"rar1402 binary not found at {args.rar1402_bin}. "
+                "Run scripts/copy-refbins.sh or pass --rar1402-bin."
+            )
+        if shutil.which("dosbox-x") is None:
+            return None, (
+                "dosbox-x not found on PATH. Install with: sudo apt install dosbox-x"
+            )
+        return Rar1402Driver(args.rar1402_bin), None
+
+    cfg = _WINE_ORACLES.get(fmt)
+    if cfg is None:
+        return None, f"no oracle configured for format {fmt}"
+    prefix = args.wineprefix_root / cfg.prefix_subdir
+    rar_exe = prefix / cfg.relative_exe()
+    if not rar_exe.is_file():
+        return None, (
+            f"{cfg.prefix_subdir} prefix not populated at {prefix}. "
+            "Run scripts/copy-refbins.sh."
+        )
+    if shutil.which("wine") is None:
+        return None, "wine not found on PATH. Install with: sudo apt install wine"
+    return (
+        WineRarDriver(
+            prefix_dir=prefix,
+            relative_exe=cfg.relative_exe(),
+            version=cfg.version,
+        ),
+        None,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="rars-bench")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("sweep", help="run a sweep over a corpus")
+    s.add_argument("--format", required=True, choices=sorted(_VARIANT_SETS))
+    s.add_argument("--variants", default="default")
+    s.add_argument(
+        "--corpus",
+        action="append",
+        default=None,
+        help="corpus class to sweep; repeat for multiple, or use 'all'",
+    )
+    s.add_argument("--corpora-root", type=Path, default=Path("corpora"))
+    s.add_argument("--out", required=True, type=Path)
+    s.add_argument("--rars-bin", type=Path, default=None)
+    s.add_argument(
+        "--rar1402-bin",
+        type=Path,
+        default=Path("_refs/rarbins/RAR1_402.EXE"),
+    )
+    s.add_argument(
+        "--wineprefix-root",
+        type=Path,
+        default=Path("_refs/wineprefixes"),
+        help="dir containing winrar* prefixes (one per oracle)",
+    )
+    s.add_argument("--work-root", type=Path, default=None)
+    s.add_argument(
+        "--cache-root",
+        type=Path,
+        default=Path("_refs/cache"),
+        help="dir for cached oracle (wine/dosbox) encode outputs",
+    )
+    s.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable oracle encode cache for this sweep",
+    )
+    s.add_argument("--skip-missing-drivers", action="store_true")
+
+    t = sub.add_parser("triage", help="print rows from a results DB")
+    t.add_argument("db", type=Path)
+    t.add_argument(
+        "--by",
+        choices=["all", "ratio-gap", "failures"],
+        default="all",
+    )
+    t.add_argument("--top", type=int, default=20)
+
+    args = p.parse_args(argv)
+
+    if args.cmd == "sweep":
+        return _cmd_sweep(args)
+    if args.cmd == "triage":
+        return _triage.run(args.db, args.by, args.top)
+    return 2
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    rars_bin = _resolve_rars_bin(args.rars_bin)
+    if rars_bin is None and not args.skip_missing_drivers:
+        print(
+            "error: rars binary not found. Build with `cargo build --release` in ../rars/, "
+            "set $RARS_BIN, or pass --rars-bin.",
+            file=sys.stderr,
+        )
+        return 2
+
+    drivers = []
+    if rars_bin is not None:
+        drivers.append(RarsDriver(rars_bin))
+
+    oracle, oracle_err = _build_oracle(args.format, args)
+    if oracle is not None:
+        drivers.append(oracle)
+    elif not args.skip_missing_drivers:
+        print(f"error: {oracle_err}", file=sys.stderr)
+        return 2
+
+    if not drivers:
+        print("error: no drivers to run", file=sys.stderr)
+        return 2
+
+    variants = _VARIANT_SETS[args.format].get(args.variants)
+    if variants is None:
+        print(
+            f"error: unknown variant set '{args.variants}' for format {args.format}",
+            file=sys.stderr,
+        )
+        return 2
+
+    corpus_classes = _resolve_corpus_classes(args.corpus, args.corpora_root)
+    if not corpus_classes:
+        print("error: no corpus classes resolved", file=sys.stderr)
+        return 2
+
+    work_root = args.work_root or args.out.parent / "work"
+    cache_root = None if args.no_cache else args.cache_root
+    rows = sweep(
+        db_path=args.out,
+        corpus_root=args.corpora_root,
+        corpus_classes=corpus_classes,
+        variants=variants,
+        drivers=drivers,
+        work_root=work_root,
+        cache_root=cache_root,
+        skip_unavailable=args.skip_missing_drivers,
+    )
+    print(f"wrote {rows} rows to {args.out}")
+    return 0
+
+
+def _resolve_corpus_classes(arg: list[str] | None, corpora_root: Path) -> list[str]:
+    if not arg:
+        arg = ["all"]
+    if "all" in arg:
+        if not corpora_root.is_dir():
+            return []
+        return sorted(p.name for p in corpora_root.iterdir() if p.is_dir())
+    return arg
+
+
+def _resolve_rars_bin(explicit: Path | None) -> Path | None:
+    if explicit is not None:
+        return explicit if explicit.is_file() else None
+    env = os.environ.get("RARS_BIN")
+    if env:
+        p = Path(env)
+        if p.is_file():
+            return p
+    candidates = [
+        Path("../rars/target/release/rars"),
+        Path("../rars/target/debug/rars"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c.resolve()
+    which = shutil.which("rars")
+    if which:
+        return Path(which)
+    return None
