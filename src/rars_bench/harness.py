@@ -218,14 +218,38 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+#: Class-name prefix marking the tier whose members are big enough to reach
+#: past a modern writer's dictionary and block sizes. The rest of the corpus
+#: caps files at 64 KiB, which was sized for the RAR 1.4 sweep.
+LARGE_TIER_PREFIX = "large-"
+
+
 def _resolve_corpus_classes(arg: list[str] | None, corpora_root: Path) -> list[str]:
+    """Resolve corpus selectors to class names.
+
+    Besides `all` and explicit names, `small` and `large` select a size tier.
+    The two answer different questions and cost very different amounts of time:
+    nothing RAR 1.4 does is visible above a 64 KiB window, so `small` is where
+    the older formats belong, and a RAR 5 dictionary, block size or filter
+    region decision shows up nowhere except `large`.
+    """
     if not arg:
         arg = ["all"]
-    if "all" in arg:
-        if not corpora_root.is_dir():
-            return []
-        return sorted(p.name for p in corpora_root.iterdir() if p.is_dir())
-    return arg
+    if not corpora_root.is_dir():
+        return [] if {"all", "small", "large"} & set(arg) else list(arg)
+    present = sorted(p.name for p in corpora_root.iterdir() if p.is_dir())
+
+    resolved: list[str] = []
+    for selector in arg:
+        if selector == "all":
+            resolved.extend(present)
+        elif selector == "large":
+            resolved.extend(c for c in present if c.startswith(LARGE_TIER_PREFIX))
+        elif selector == "small":
+            resolved.extend(c for c in present if not c.startswith(LARGE_TIER_PREFIX))
+        else:
+            resolved.append(selector)
+    return sorted(dict.fromkeys(resolved))
 
 
 def _resolve_rars_bin(explicit: Path | None) -> Path | None:
@@ -236,13 +260,15 @@ def _resolve_rars_bin(explicit: Path | None) -> Path | None:
         p = Path(env)
         if p.is_file():
             return p
-    candidates = [
-        Path("../rars/target/release/rars"),
-        Path("../rars/target/debug/rars"),
-    ]
-    for c in candidates:
-        if c.is_file():
-            return c.resolve()
+    # ../rars was true when this lived beside the checkout. It usually does
+    # not any more, and the failure mode was a whole sweep skipped rather
+    # than an error, so try the places a checkout actually turns up.
+    roots = [Path("../rars"), Path.home() / "src/rars", Path(__file__).resolve().parents[3] / "rars"]
+    for root in roots:
+        for profile in ("release", "debug"):
+            candidate = root / "target" / profile / "rars"
+            if candidate.is_file():
+                return candidate.resolve()
     which = shutil.which("rars")
     if which:
         return Path(which)

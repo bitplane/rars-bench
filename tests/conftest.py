@@ -13,16 +13,19 @@ def rars_bin() -> Path:
     candidates = []
     if explicit:
         candidates.append(Path(explicit))
+    # The sibling checkout is the original layout and usually is not where it
+    # sits any more, which turned every driver test into a silent skip.
+    roots = [
+        Path(__file__).resolve().parents[2] / "rars",
+        Path.home() / "src" / "rars",
+    ]
     candidates.extend(
-        [
-            Path(__file__).resolve().parent.parent.parent / "rars" / "target" / "release" / "rars",
-            Path(__file__).resolve().parent.parent.parent / "rars" / "target" / "debug" / "rars",
-        ]
+        root / "target" / profile / "rars" for root in roots for profile in ("release", "debug")
     )
     for c in candidates:
         if c.is_file() and os.access(c, os.X_OK):
             return c.resolve()
-    pytest.skip("rars binary not built; run `cargo build --release` in ../rars/")
+    pytest.skip("rars binary not built; set $RARS_BIN or build the rars checkout")
 
 
 @pytest.fixture

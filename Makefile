@@ -1,4 +1,4 @@
-.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
+.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-all sweep-large copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -31,8 +31,18 @@ sample-bin: install
 seed-text-small:
 	./scripts/seed-text-small.sh
 
+# The small tier: files capped at 64 KiB, sized for the RAR 1.4 sweep this
+# harness was originally built for.
 seed-corpora:
 	./scripts/seed-corpora.sh
+
+# The large tier: ~4 MB per class, which is the only place a RAR 5 dictionary,
+# block size or filter region decision is visible at all. Set RARS_REPO if the
+# rars checkout is not a sibling of this repo.
+seed-corpora-large:
+	./scripts/seed-corpora-large.sh
+
+seed-all: seed-corpora seed-corpora-large
 
 copy-refbins:
 	./scripts/copy-refbins.sh
@@ -54,29 +64,29 @@ sweep: sweep-rar14
 
 sweep-rar14: install seed-corpora copy-refbins clean-results
 	mkdir -p results
-	$(RARS_BENCH) sweep --format rar14 --corpus all --out results/rar14.db
+	$(RARS_BENCH) sweep --format rar14 --corpus small --out results/rar14.db
 
 sweep-rar20: install seed-corpora copy-refbins clean-results
 	mkdir -p results
-	$(RARS_BENCH) sweep --format rar20 --corpus all --out results/rar20.db
+	$(RARS_BENCH) sweep --format rar20 --corpus small --out results/rar20.db
 
-sweep-rar29: install seed-corpora copy-refbins clean-results
+sweep-rar29: install seed-all copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar29 --corpus all --out results/rar29.db
 
-sweep-rar30: install seed-corpora copy-refbins clean-results
+sweep-rar30: install seed-all copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar30 --corpus all --out results/rar30.db
 
-sweep-rar40: install seed-corpora copy-refbins clean-results
+sweep-rar40: install seed-all copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar40 --corpus all --out results/rar40.db
 
-sweep-rar50: install seed-corpora copy-refbins clean-results
+sweep-rar50: install seed-all copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar50 --corpus all --out results/rar50.db
 
-sweep-rar70: install seed-corpora copy-refbins clean-results
+sweep-rar70: install seed-all copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar70 --corpus all --out results/rar70.db
 
@@ -100,6 +110,13 @@ sweep-all-wine: install seed-corpora copy-refbins clean-results
 	$(RARS_BENCH) sweep --format rar40 --corpus all --out results/all-wine.db
 	$(RARS_BENCH) sweep --format rar50 --corpus all --out results/all-wine.db
 	$(RARS_BENCH) sweep --format rar70 --corpus all --out results/all-wine.db
+
+# Just the large tier against the modern writer. This is the one to run when
+# the question is "how do we compare", because the small tier reports about a
+# third of the real gap.
+sweep-large: install seed-corpora-large copy-refbins
+	mkdir -p results
+	$(RARS_BENCH) sweep --format rar50 --corpus large --out results/large50.db
 
 triage: install
 	@db=$$(ls -t results/*.db 2>/dev/null | head -1); \

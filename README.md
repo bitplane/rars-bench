@@ -61,38 +61,61 @@ formats.
 
 ## Corpus shape
 
-Each subdir is one `corpus_class` column in the results DB. Add subdirs ad
-hoc as new test types come up.
+Each subdir is one `corpus_class` column in the results DB. There are two
+size tiers, and the split matters more than any individual class.
 
-| subdir              | shape                                   |
-|---------------------|-----------------------------------------|
-| text                | source trees, prose, JSON, CSV          |
-| binary-x86_64       | ELF samples, exercises x86 filter       |
-| binary-arm          | exercises ARM filter                    |
-| incompressible      | random bytes, already-compressed (.zst) |
-| highly-compressible | zeros, repeated patterns                |
-| many-small          | thousands of tiny files (solid mode)    |
-| few-large           | video chunks, db dumps                  |
-| audio-wav           | exercises delta / audio filter          |
-| edge-sizes          | 0B, 1B, 64KiB±1, dict-boundary          |
-| mixed               | tar of a real project                   |
+**Small tier** (`make seed-corpora`, selector `small`). Files capped at
+64 KiB, ~250 KiB per class. Sized that way deliberately: this harness was
+built for the RAR 1.4 sweep, and RAR 1.4's dictionary is 64 KiB, so a bigger
+file adds no compression headroom for it. Classes: `bin-elf`, `bin-shell`,
+`doc-text`, `downloads`, `fonts-ttf`, `headers`, `icons-png`, `logs`,
+`manpages`, `mixed`.
 
-Helpers:
+**Large tier** (`make seed-corpora-large`, selector `large`). ~4 MB per class.
+Nothing in the small tier reaches 128 KiB, so a RAR 5 writer's dictionary
+sizing, block sizing and filter region screening are all invisible to it, and
+the gap it reports against WinRAR (about +3%) is a third of what real files
+show (+11% to +30%).
 
-- `scripts/fetch-silesia.sh`, `scripts/fetch-calgary.sh` — populate canonical
-  benchmark corpora.
-- `scripts/sample-bin.sh [N]` — copy N random ELF binaries from `/usr/bin`.
+| subdir                 | shape                                                        |
+|------------------------|--------------------------------------------------------------|
+| `large-bin-stripped`   | multi-MB ELF, no debug data, one big code region             |
+| `large-bin-unstripped` | debug sections outnumber code; breaks naive filter screening |
+| `large-text`           | prose at a size where the dictionary decides the outcome     |
+| `large-source-tree`    | tar of source: many small files, heavy repetition            |
+| `large-incompressible` | already-compressed `.zst` / `.xz`                            |
+| `large-compressible`   | long runs and a repeating phrase                             |
+
+Both tiers are throwaway and gitignored. Everything is seeded from local files
+or generated deterministically, so reseeding produces identical bytes and the
+oracle encode cache stays valid.
+
+Other helpers: `scripts/fetch-silesia.sh` and `scripts/fetch-calgary.sh` fetch
+canonical benchmark corpora, unused by the seeded tiers;
+`scripts/sample-bin.sh [N]` copies N random ELF binaries from `/usr/bin`.
 
 ## Running a sweep
 
-(harness not yet implemented — see Status below)
+```sh
+make seed-all            # both tiers
+make sweep-large         # rar50 over the large tier — the "how do we compare" run
+make triage              # ranked table from the newest results DB
+```
+
+Or directly, which is what the make targets do:
 
 ```sh
-make install
-./scripts/sample-bin.sh 50
-rars-bench sweep --format rar5 --variants m1,m3 --out results/2026-05-07.db
-rars-bench triage results/2026-05-07.db --by ratio-gap --top 20
+rars-bench sweep --format rar50 --corpus large --out results/large50.db
+rars-bench triage results/large50.db --by ratio-gap --top 20
 ```
+
+`--corpus` takes `all`, the tier selectors `small` and `large`, or explicit
+class names. The rar14 and rar20 targets use `small`, because the large tier
+costs time and tells them nothing; everything from rar29 up uses both.
+
+The rars binary is found via `$RARS_BIN`, then a sibling `../rars` checkout,
+then `~/src/rars`. Set `$RARS_REPO` for the seeder if the checkout is
+somewhere else again.
 
 ## Result schema
 
@@ -102,9 +125,13 @@ compress operation. Triage queries join `rars` and `rar` rows on the same
 
 ## Caveats baked in from day one
 
-- **Wine `rar` startup is ~1s.** For sweeps over many small files, batch
-  inputs into a single `rar a @filelist` invocation. Per-file timing is
-  approximate; per-archive ratio is exact.
+- **Oracle timings are not measurements.** Wine startup measures ~110 ms,
+  but a live `rar t` on the same archive varied 267 ms warm to 998 ms cold,
+  and `encode_ms` for an oracle row is replayed from the encode cache rather
+  than timed. Read oracle rows for bytes, never for speed. Note also that
+  `decode_ms` is the *cross*-decoder's time: on a `rars` row it is how long
+  WinRAR took to test our archive, which reads backwards from what the column
+  name suggests.
 - **Encrypted runs lose byte-equality.** `rars` uses `getrandom` for salts
   and IVs, so encrypted output bytes differ run-to-run. `roundtrip_status`
   for encrypted runs only tracks decode success, not byte-equality.
@@ -117,28 +144,25 @@ compress operation. Triage queries join `rars` and `rar` rows on the same
 
 ## Status
 
-**v0 skeleton.** Plan and structure committed; harness and triage CLI not yet
-implemented. Pick up in this order:
+Working. Harness, drivers, oracle cache and triage CLI are all implemented and
+run. What is known to be wrong, in the order it is worth fixing:
 
-1. `harness.py` — invoke `rars a` and `rar a` on a single file, capture ratio
-   + timing into sqlite. Smoke-test on `corpora/edge-sizes/`.
-2. `formats/rar5.py` — declare the RAR5 m1+m3 starting variant. Drive
-   `harness.py` across the corpus subdirs.
-3. `triage.py` — `triage by-ratio-gap`, `triage decode-failures`, `triage
-   drill --corpus-path <path>`.
-4. `scripts/fetch-silesia.sh` / `fetch-calgary.sh` — populate standard
-   corpora.
-5. Add filter on/off variant axis; rerun.
-6. Add solid; rerun.
-7. Add encryption; rerun.
-8. Add dict size; rerun.
-9. Add methods 0/2/4/5; rerun.
-10. Move to next format (RAR2.9 first — most complex codec, biggest
-    surface).
+1. **Timings are not trustworthy.** See the caveat above. The fix is probably
+   to stop recording oracle timings entirely and report speed only for rars,
+   measured natively, rather than to keep patching an emulated number.
+2. **No internal-decision capture.** When ratios diverge we still cannot see
+   whether rars picked a different filter, missed a long match or chose a
+   different block size. `rars a --report-json` emitting
+   `{method_chosen, filters_emitted, block_count, dict_size_used}` is still
+   the right hook, and still unbuilt.
+3. **Variant axes beyond method.** Filter on/off, solid, encrypted and dict
+   size are declared in the format modules but the sweeps drive method only.
 
-Open question to revisit: propose `rars a --report-json` as a follow-up task
-for codex on the `rars` side, so the introspection hook is ready when the
-harness needs it.
+The corpus caveat that motivated the large tier is worth stating plainly for
+whoever reads a result table next: this harness began as proof-of-concept
+checking that a from-spec RAR writer produced decodable archives at all, and
+its corpus was sized for that. It answers "is our compression competitive"
+only since the large tier existed.
 
 ## Conventions
 
