@@ -15,7 +15,7 @@ DEST_PREFIX="$HERE/../_refs/wineprefixes"
 RAR_REPO="${RAR_REPO:-/home/gaz/src/tmp/rar}"
 mkdir -p "$DEST_BINS" "$DEST_PREFIX"
 
-# 1. RAR 1.402 (DOSBox oracle)
+# 1. RAR 1.402 (DOSBox oracle for rar14)
 RAR1402_FIXTURE="$RAR_REPO/fixtures/1.402/.rar1402-bin/RAR.EXE"
 RAR1402_REFBINS="$RAR_REPO/_refs/rarbins/RAR1_402.EXE"
 if [ -f "$RAR1402_FIXTURE" ]; then
@@ -27,6 +27,15 @@ elif [ -f "$RAR1402_REFBINS" ]; then
 else
     echo "error: no RAR1_402.EXE found in $RAR_REPO" >&2
     exit 1
+fi
+
+# 1b. RAR 2.50 (DOSBox oracle for rar20). Same fixture pattern as 1.402.
+RAR250_FIXTURE="$RAR_REPO/fixtures/2.50/.work/RAR.EXE"
+if [ -f "$RAR250_FIXTURE" ]; then
+    cp "$RAR250_FIXTURE" "$DEST_BINS/RAR250.EXE"
+    echo "mirrored RAR250.EXE (fixtures, $(stat -c %s "$RAR250_FIXTURE") bytes)"
+else
+    echo "warning: no RAR.EXE at $RAR250_FIXTURE; rar20 oracle unavailable" >&2
 fi
 
 # 2. WinRAR 2.90 wineprefix (rar29 oracle)

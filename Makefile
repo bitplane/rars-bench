@@ -1,4 +1,4 @@
-.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora copy-refbins sweep sweep-rar14 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
+.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -55,6 +55,10 @@ sweep: sweep-rar14
 sweep-rar14: install seed-corpora copy-refbins clean-results
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar14 --corpus all --out results/rar14.db
+
+sweep-rar20: install seed-corpora copy-refbins clean-results
+	mkdir -p results
+	$(RARS_BENCH) sweep --format rar20 --corpus all --out results/rar20.db
 
 sweep-rar29: install seed-corpora copy-refbins clean-results
 	mkdir -p results

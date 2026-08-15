@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import triage as _triage
-from .drivers import Rar1402Driver, RarsDriver, WineRarDriver
+from .drivers import DosRarDriver, RarsDriver, WineRarDriver
+from .formats.rar20 import RAR20_DEFAULT
 from .formats.rar30 import RAR30_DEFAULT
 from .formats.rar40 import RAR40_DEFAULT
 from .formats.rar50 import RAR50_DEFAULT
@@ -19,6 +20,7 @@ from .variants import RAR14_SLICE
 
 _VARIANT_SETS: dict[str, dict[str, list]] = {
     "rar14": {"default": RAR14_SLICE},
+    "rar20": {"default": RAR20_DEFAULT},
     "rar29": {"default": RAR29_DEFAULT},
     "rar30": {"default": RAR30_DEFAULT},
     "rar40": {"default": RAR40_DEFAULT},
@@ -37,6 +39,18 @@ class _WineOracle:
         return Path(self.rar_relpath)
 
 
+@dataclass(frozen=True)
+class _DosOracle:
+    version: str            # rendered into the schema's encoder_version
+    arg_attr: str           # argparse Namespace attribute holding the binary path
+
+
+_DOS_ORACLES: dict[str, _DosOracle] = {
+    "rar14": _DosOracle(version="1.402", arg_attr="rar1402_bin"),
+    "rar20": _DosOracle(version="2.50",  arg_attr="rar250_bin"),
+}
+
+
 # Map format -> wine oracle config. Each entry resolves to a WineRarDriver
 # in _build_oracle.
 _WINE_ORACLES: dict[str, _WineOracle] = {
@@ -50,17 +64,19 @@ _WINE_ORACLES: dict[str, _WineOracle] = {
 
 
 def _build_oracle(fmt: str, args: argparse.Namespace):
-    if fmt == "rar14":
-        if not args.rar1402_bin.is_file():
+    dos_cfg = _DOS_ORACLES.get(fmt)
+    if dos_cfg is not None:
+        bin_path = getattr(args, dos_cfg.arg_attr)
+        if not bin_path.is_file():
             return None, (
-                f"rar1402 binary not found at {args.rar1402_bin}. "
-                "Run scripts/copy-refbins.sh or pass --rar1402-bin."
+                f"{dos_cfg.version} binary not found at {bin_path}. "
+                f"Run scripts/copy-refbins.sh or pass --{dos_cfg.arg_attr.replace('_', '-')}."
             )
         if shutil.which("dosbox-x") is None:
             return None, (
                 "dosbox-x not found on PATH. Install with: sudo apt install dosbox-x"
             )
-        return Rar1402Driver(args.rar1402_bin), None
+        return DosRarDriver(bin_path, version=dos_cfg.version), None
 
     cfg = _WINE_ORACLES.get(fmt)
     if cfg is None:
@@ -104,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
         "--rar1402-bin",
         type=Path,
         default=Path("_refs/rarbins/RAR1_402.EXE"),
+    )
+    s.add_argument(
+        "--rar250-bin",
+        type=Path,
+        default=Path("_refs/rarbins/RAR250.EXE"),
     )
     s.add_argument(
         "--wineprefix-root",

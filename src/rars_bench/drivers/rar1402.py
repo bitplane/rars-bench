@@ -1,4 +1,10 @@
-"""Rar1402Driver — drives RAR1_402.EXE under DOSBox-X.
+"""DosRarDriver — drives a DOS RAR.EXE under DOSBox-X.
+
+Used for the DOS-era oracles: RAR 1.402 (rar14 wire format) and RAR 2.50
+(rar20 wire format, same as RAR4 family). The class is parameterised by
+binary path + version label; the per-variant `-m{0..5}` flag covers level
+selection (RAR 1.402 ignores -m1..-m5 — its writer has no level concept —
+but accepts the flag without error).
 
 Each compress/extract/test creates a fresh session directory under
 out_archive.parent (or out_dir.parent), copies the binary + inputs in,
@@ -16,7 +22,7 @@ from .base import DecodeResult, EncodeResult
 
 
 @dataclass
-class Rar1402Driver:
+class DosRarDriver:
     exe_path: Path
     name: str = "rar"
     version: str = "1.402"
@@ -37,7 +43,7 @@ class Rar1402Driver:
         s = DosboxSession(session_dir)
         s.add_binary(self.exe_path, "RAR.EXE")
         dos_inputs = [s.add_input(p) for p in inputs]
-        method_flag = " -m0" if variant.method == "stored" else ""
+        method_flag = _method_flag(variant)
         password_flag = f" -p{variant.password}" if variant.password else ""
         # DOS COMMAND.COM has a ~127-byte command line limit. With 8.3 names
         # averaging ~12 chars, ~10 inputs already exceed it and rar silently
@@ -130,3 +136,25 @@ class Rar1402Driver:
         d = parent / f".dos-{kind}-{self._session_id:03d}-{token}"
         d.mkdir(parents=True, exist_ok=False)
         return d
+
+
+def _method_flag(variant: Variant) -> str:
+    """Map our variant.method to a DOS RAR `-m` switch.
+
+    'stored'                 -> ' -m0'
+    'compressed' (rar14)     -> ''  (DOS RAR 1.402 default)
+    'lz-N' for N in 1..5     -> ' -mN'
+    anything else            -> ''
+    """
+    method = variant.method
+    if method == "stored":
+        return " -m0"
+    if method.startswith("lz-"):
+        suffix = method[3:]
+        if suffix.isdigit() and 0 <= int(suffix) <= 5:
+            return f" -m{suffix}"
+    return ""
+
+
+# Back-compat alias — original name was 1.402-specific.
+Rar1402Driver = DosRarDriver
