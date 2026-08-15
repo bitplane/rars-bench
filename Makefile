@@ -1,4 +1,4 @@
-.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-all sweep-large copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
+.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-all sweep-large report copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -117,6 +117,14 @@ sweep-all-wine: install seed-corpora copy-refbins clean-results
 sweep-large: install seed-corpora-large copy-refbins
 	mkdir -p results
 	$(RARS_BENCH) sweep --format rar50 --corpus large --out results/large50.db
+
+# Standalone HTML with bar charts, from the newest results DB. Pass several
+# DBs to rars-bench report directly to stack them as sections, which is how
+# you compare a change or compare the two corpus tiers.
+report: install
+	@db=$$(ls -t results/*.db 2>/dev/null | head -1); \
+	if [ -z "$$db" ]; then echo "no results/*.db found — run a sweep first"; exit 2; fi; \
+	$(RARS_BENCH) report "$$db" --out results/report.html
 
 triage: install
 	@db=$$(ls -t results/*.db 2>/dev/null | head -1); \

@@ -155,12 +155,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     t.add_argument("--top", type=int, default=20)
 
+    r = sub.add_parser("report", help="render results DBs as a standalone HTML report")
+    r.add_argument("db", type=Path, nargs="+", help="one or more results DBs, rendered as stacked sections")
+    r.add_argument(
+        "--label",
+        action="append",
+        default=None,
+        help="section heading for the matching DB; defaults to its filename",
+    )
+    r.add_argument("--out", type=Path, default=Path("results/report.html"))
+    r.add_argument("--title", default=None)
+
     args = p.parse_args(argv)
 
     if args.cmd == "sweep":
         return _cmd_sweep(args)
     if args.cmd == "triage":
         return _triage.run(args.db, args.by, args.top)
+    if args.cmd == "report":
+        from . import report as _report
+
+        labels = list(args.label or [])
+        labels += [None] * (len(args.db) - len(labels))
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        written = _report.write_report(list(zip(args.db, labels)), args.out, args.title)
+        print(f"wrote {written}")
+        return 0
     return 2
 
 

@@ -100,6 +100,15 @@ canonical benchmark corpora, unused by the seeded tiers;
 make seed-all            # both tiers
 make sweep-large         # rar50 over the large tier — the "how do we compare" run
 make triage              # ranked table from the newest results DB
+make report              # standalone HTML with bar charts
+```
+
+`report` takes several DBs and stacks them as sections, which is how to compare
+a change against a baseline, or the two corpus tiers against each other:
+
+```sh
+rars-bench report results/large50.db results/rar50.db \
+  --label "Large tier" --label "Small tier" --out results/report.html
 ```
 
 Or directly, which is what the make targets do:
