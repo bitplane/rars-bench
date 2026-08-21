@@ -9,11 +9,11 @@ from pathlib import Path
 from . import triage as _triage
 from .drivers import DosRarDriver, RarsDriver, WineRarDriver
 from .formats.rar20 import RAR20_DEFAULT
-from .formats.rar30 import RAR30_DEFAULT
-from .formats.rar40 import RAR40_DEFAULT
+from .formats.rar30 import RAR30_DEFAULT, RAR30_SOLID
+from .formats.rar40 import RAR40_DEFAULT, RAR40_SOLID
 from .formats.rar50 import RAR50_DEFAULT
 from .formats.rar70 import RAR70_DEFAULT
-from .formats.rar29 import RAR29_DEFAULT
+from .formats.rar29 import RAR29_DEFAULT, RAR29_SOLID
 from .runner import sweep
 from .variants import RAR14_SLICE
 
@@ -21,9 +21,9 @@ from .variants import RAR14_SLICE
 _VARIANT_SETS: dict[str, dict[str, list]] = {
     "rar14": {"default": RAR14_SLICE},
     "rar20": {"default": RAR20_DEFAULT},
-    "rar29": {"default": RAR29_DEFAULT},
-    "rar30": {"default": RAR30_DEFAULT},
-    "rar40": {"default": RAR40_DEFAULT},
+    "rar29": {"default": RAR29_DEFAULT, "solid": RAR29_SOLID},
+    "rar30": {"default": RAR30_DEFAULT, "solid": RAR30_SOLID},
+    "rar40": {"default": RAR40_DEFAULT, "solid": RAR40_SOLID},
     "rar50": {"default": RAR50_DEFAULT},
     "rar70": {"default": RAR70_DEFAULT},
 }

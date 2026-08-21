@@ -24,3 +24,21 @@ def baseline_variants(fmt: str) -> list[Variant]:
             )
         )
     return cells
+
+
+def solid_variants(fmt: str) -> list[Variant]:
+    """The same levels again with --solid.
+
+    Solid is where the RAR 2.9 family keeps its PPMd model and its Huffman
+    tables across members, so it is a different encoder question from the
+    baseline rather than the same one with a flag on. Level 0 is left out:
+    stored members are copied either way.
+    """
+    return [
+        Variant(
+            format=fmt, method=f"lz-{level}", method_int=level,
+            filter="none", solid=True, encrypted=False, password=None,
+            dict_log=None, volume_size=None,
+        )
+        for level in range(1, 6)
+    ]

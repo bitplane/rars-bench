@@ -11,7 +11,8 @@ Followups (out of slice):
   - solid variant (`-s` on wrar290, `--solid` on rars)
   - multi-volume
 """
-from ._common import baseline_variants
+from ._common import baseline_variants, solid_variants
 
 
 RAR29_DEFAULT = baseline_variants("rar29")
+RAR29_SOLID = solid_variants("rar29")

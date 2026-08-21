@@ -1,5 +1,6 @@
 """RAR 3.0 variant set. Oracle: WinRAR 3.0 under wine."""
-from ._common import baseline_variants
+from ._common import baseline_variants, solid_variants
 
 
 RAR30_DEFAULT = baseline_variants("rar30")
+RAR30_SOLID = solid_variants("rar30")
