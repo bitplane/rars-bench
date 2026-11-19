@@ -7,6 +7,10 @@ cross-decoder's identity implicitly as "the other encoder in the available
 list". corpus_path stores the corpus_class name (since the archive scope
 is the whole class), input_bytes is the sum across members.
 
+output_bytes is the whole archive and packed_bytes the members' compressed
+data alone (see packed.py). Score encoders on packed_bytes: the archive also
+carries each side's member names, which the two sides store differently.
+
 Sweep is serial — RUSAGE_CHILDREN deltas are only meaningful when there's
 exactly one outstanding child at a time.
 """
@@ -19,6 +23,7 @@ from . import cache as _cache
 from .compare import roundtrip_status
 from .corpus import CorpusItem, enumerate_class
 from .drivers.base import Driver, EncodeResult
+from .packed import packed_bytes
 from .schema import init_db
 from .variants import Variant
 
@@ -29,13 +34,13 @@ INSERT INTO runs (
     corpus_class, corpus_path, input_bytes,
     encoder, encoder_version, output_bytes,
     encode_ms, encode_peak_rss, decode_ms, decode_peak_rss,
-    roundtrip_status, rars_internal
+    roundtrip_status, rars_internal, packed_bytes
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?,
     ?, ?, ?,
     ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?
+    ?, ?, ?
 )
 """
 
@@ -98,6 +103,11 @@ def sweep(
                         cache_root=cache_root,
                     )
                     status = roundtrip_status(enc, test_exit)
+                    packed = (
+                        packed_bytes(enc.archive_path)
+                        if enc.archive_bytes > 0 and enc.archive_path.is_file()
+                        else None
+                    )
                     conn.execute(
                         _INSERT_SQL,
                         (
@@ -121,6 +131,7 @@ def sweep(
                             None,
                             status,
                             None,
+                            packed,
                         ),
                     )
                     rows_written += 1

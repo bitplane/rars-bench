@@ -9,16 +9,22 @@ cell, which swamps the work itself. This times the native Linux RAR 7.12
 instead, on the same corpus classes, writing RAR 5 at the same level with
 each encoder's defaults otherwise. The two binaries alternate within each
 round and the minimum over the rounds is kept, so ambient load and a cold
-cache hit both alike.
+cache hit both alike. Sizes are recorded both ways: `*_bytes` is the whole
+archive and `*_packed` the members' compressed data, which is the one to
+compare, since rars here stores the corpus path and RAR (`-ep`) bare names.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rars_bench.packed import packed_bytes  # noqa: E402
 
 
 def files(corpus: Path, cls: str) -> list[str]:
@@ -50,7 +56,7 @@ def main() -> int:
             for cls in classes:
                 inputs = files(args.corpus, cls)
                 best = {"rars": float("inf"), "rar": float("inf")}
-                sizes = {}
+                sizes, packed = {}, {}
                 for round_ in range(args.rounds):
                     # Alternate which goes first, so neither always gets the warm cache.
                     order = ["rars", "rar"] if round_ % 2 == 0 else ["rar", "rars"]
@@ -65,10 +71,12 @@ def main() -> int:
                                    str(out), *inputs]
                         best[encoder] = min(best[encoder], run(cmd))
                         sizes[encoder] = out.stat().st_size
+                        packed[encoder] = packed_bytes(out)
                 results.append({"level": level, "class": cls,
                                 "input_bytes": sum(Path(p).stat().st_size for p in inputs),
                                 "rars_s": best["rars"], "rar_s": best["rar"],
-                                "rars_bytes": sizes["rars"], "rar_bytes": sizes["rar"]})
+                                "rars_bytes": sizes["rars"], "rar_bytes": sizes["rar"],
+                                "rars_packed": packed["rars"], "rar_packed": packed["rar"]})
                 print(f"m{level} {cls:24} rars {best['rars']:7.3f}s  rar {best['rar']:7.3f}s"
                       f"  {best['rars'] / best['rar']:6.2f}x", flush=True)
     args.out.write_text(json.dumps(results, indent=1))

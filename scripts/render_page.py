@@ -46,6 +46,18 @@ def heat(gap: float | None) -> str:
     return f'<td class="heat {kind}" style="--w:{weight:.2f}"><span>{pct(gap)}</span></td>'
 
 
+def size_gap(rows: list[dict]) -> float:
+    """rars over the reference, on packed bytes when timing.py recorded them.
+
+    Older timing files carry archive sizes only, which include member names
+    the two encoders store differently, so they are used only when no row
+    has packed sizes.
+    """
+    mine, theirs = ("rars_packed", "rar_packed") if all("rars_packed" in r for r in rows) \
+        else ("rars_bytes", "rar_bytes")
+    return sum(r[mine] for r in rows) / sum(r[theirs] for r in rows) - 1
+
+
 def ratio(value: float, cls: str = "num") -> str:
     return f'<td class="{cls}">{value:.2f}x</td>'
 
@@ -142,6 +154,10 @@ def render(args) -> str:
     threads = json.loads(args.threads.read_text())
     decode = json.loads(args.decode.read_text())
     f = summary["formats"]
+    # summarise.py scores packed bytes unless told --archive-bytes; older
+    # summaries say nothing and scored whole archives.
+    size_kind = {"packed_bytes": "packed bytes, the members' compressed data without their names"}.get(
+        summary.get("size"), "archive bytes, member names included")
     g = lambda fmt, level, kind="default": f[fmt][kind][level]
 
     # Writing time against native RAR 7.12.
@@ -153,12 +169,12 @@ def render(args) -> str:
         rows = by_level[level]
         mine, theirs = sum(r["rars_s"] for r in rows), sum(r["rar_s"] for r in rows)
         median = statistics.median(r["rars_s"] / r["rar_s"] for r in rows)
-        size = sum(r["rars_bytes"] for r in rows) / sum(r["rar_bytes"] for r in rows) - 1
+        size = size_gap(rows)
         write_stats[level] = (mine / theirs, median)
         write_rows.append(f'<tr><th>m{level}</th><td class="num">{mine:.2f}s</td><td class="num">{theirs:.2f}s</td>'
                           f'{ratio(mine / theirs)}{ratio(median)}{heat(size)}</tr>')
     m5 = {r["class"]: r for r in by_level[5]}
-    size5 = sum(r["rars_bytes"] for r in by_level[5]) / sum(r["rar_bytes"] for r in by_level[5]) - 1
+    size5 = size_gap(by_level[5])
     write_classes = "".join(
         f'<tr><th>{LABEL[c]}</th><td class="num">{m5[c]["input_bytes"] / 1e6:.2f} MB</td>'
         f'<td class="num">{m5[c]["rars_s"]:.3f}s</td><td class="num">{m5[c]["rar_s"]:.3f}s</td>'
@@ -173,7 +189,7 @@ def render(args) -> str:
         rows = legacy_by[level]
         mine, theirs = sum(r["rars_s"] for r in rows), sum(r["rar_s"] for r in rows)
         median = statistics.median(r["rars_s"] / r["rar_s"] for r in rows)
-        size = sum(r["rars_bytes"] for r in rows) / sum(r["rar_bytes"] for r in rows) - 1
+        size = size_gap(rows)
         legacy_stats[level] = (mine / theirs, median)
         legacy_rows.append(f'<tr><th>m{level}</th><td class="num">{mine:.2f}s</td><td class="num">{theirs:.2f}s</td>'
                            f'{ratio(mine / theirs)}{ratio(median)}{heat(size)}</tr>')
@@ -205,8 +221,16 @@ def render(args) -> str:
     failures = [r for r in decode if r["rars_exit"] or r["unrar_exit"]]
 
     rar50, rar70 = f["rar50"]["default"], f["rar70"]["default"]
-    worst50 = max(rar50["m5"]["classes"].items(), key=lambda kv: kv[1]["gap"])
-    best50 = min(rar50["m5"]["classes"].items(), key=lambda kv: kv[1]["gap"])
+    # The compressible member packs to a few hundred bytes, so its percentage
+    # is noise (the class table says so) and it is kept out of best and worst.
+    ranked50 = sorted(((c, d) for c, d in rar50["m5"]["classes"].items() if c != "large-compressible"),
+                      key=lambda kv: kv[1]["gap"])
+    best50, worst50 = ranked50[0], ranked50[-1]
+    losses50 = [LABEL[c] for c, d in reversed(ranked50) if d["gap"] > 0]
+    median50 = rar50["m5"]["median_gap"]
+    typical = ("still a hair larger than WinRAR's" if median50 > 0
+               else "smaller than WinRAR's by more than the total says" if median50 < rar50["m5"]["gap"]
+               else "smaller than WinRAR's")
     rar30_m5 = g("rar30", "m5")["classes"]
     n_cells = sum(level["cells"] for sections in f.values() for section in sections.values()
                   for level in section.values())
@@ -215,9 +239,9 @@ def render(args) -> str:
         f"On size, rars is level with real RAR or ahead of it in most of the table. RAR 5 lands "
         f"<b>{pct(g('rar50', 'm5')['gap'])}</b> against WinRAR 6.02 at level 5 and "
         f"<b>{pct(g('rar50', 'm3')['gap'])}</b> at the default level 3, and RAR 7 "
-        f"<b>{pct(g('rar70', 'm5')['gap'])}</b> against 7.21. Those totals lean on the large "
-        f"members: the median RAR 5 class at m5 is <b>{pct(rar50['m5']['median_gap'])}</b>, so the "
-        f"typical member is still a hair larger than WinRAR's. The weak row is RAR 3.0 at "
+        f"<b>{pct(g('rar70', 'm5')['gap'])}</b> against 7.21. Those totals are weighted by the large "
+        f"members: the median RAR 5 class at m5 is <b>{pct(median50)}</b>, so the "
+        f"typical member is {typical}. The weak row is RAR 3.0 at "
         f"<b>{pct(g('rar30', 'm5')['gap'])}</b>, and the reason is binaries: the unstripped ELF is "
         f"{pct(rar30_m5['large-bin-unstripped']['gap'])} and the stripped one "
         f"{pct(rar30_m5['large-bin-stripped']['gap'])}. On speed the picture is the other way round. "
@@ -240,8 +264,8 @@ def render(args) -> str:
   <h1>rars against real RAR</h1>
   <p>How a from-scratch Rust RAR implementation compares with the RAR it imitates, across every
      format it writes and every corpus shape the harness keeps: how small its archives are, how
-     long it takes to write them, and how long it takes to read RAR's own. Sizes are total packed
-     bytes as a percentage over the reference, so zero is parity and negative means rars won.</p>
+     long it takes to write them, and how long it takes to read RAR's own. Sizes are total {size_kind}
+     as a percentage over the reference, so zero is parity and negative means rars won.</p>
   <p class="meta"><b>head</b> {args.head} &nbsp;·&nbsp; <b>swept</b> {args.swept}, all seven formats from one
      pinned binary, {n_cells} scored cells &nbsp;·&nbsp; <b>harness</b> rars-bench</p>
 </header>
@@ -261,8 +285,8 @@ def render(args) -> str:
         {pct(g('rar29', 'm5')['median_gap'])} against {pct(g('rar29', 'm5')['gap'])}, because it wins big on
         every text class.</li>
     <li><b>RAR 5's worst class is {LABEL[worst50[0]]} at {pct(worst50[1]['gap'])}</b> and its best
-        {LABEL[best50[0]]} at {pct(best50[1]['gap'])}. Across RAR 5 and 7 the losses are the small
-        binaries, shell scripts and the unstripped ELF; the wins are prose, the source tree and headers.</li>
+        {LABEL[best50[0]]} at {pct(best50[1]['gap'])}, leaving out the compressible member. At m5 RAR 5
+        loses on {", ".join(losses50) or "no class"} and wins on every other.</li>
     <li><b>m1 flatters us and m2 does not.</b> RAR 4.0 reads {pct(g('rar40', 'm1')['gap'])} at m1 and
         {pct(g('rar40', 'm2')['gap'])} at m2. The levels are a ladder of dictionary size and effort,
         and ours and RAR's rungs do not sit at the same heights.</li>

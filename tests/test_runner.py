@@ -51,6 +51,7 @@ def test_sweep_writes_one_row_per_encoder(
     input_bytes = [
         r[0] for r in conn.execute("SELECT input_bytes FROM runs").fetchall()
     ]
+    sizes = conn.execute("SELECT packed_bytes, output_bytes FROM runs").fetchall()
     conn.close()
 
     assert encoders == ["rar", "rars"]
@@ -58,6 +59,8 @@ def test_sweep_writes_one_row_per_encoder(
     assert all(b is not None and b > 0 for b in output_bytes)
     # input_bytes is the SUM across the multi-member corpus, not a single file.
     assert all(b > 1 for b in input_bytes)
+    # Both sides' archives are readable for packed size, which leaves out headers.
+    assert all(packed is not None and 0 < packed < archive for packed, archive in sizes)
 
 
 def test_sweep_skips_unavailable_when_flagged(rars_bin, tiny_corpus, tmp_path):

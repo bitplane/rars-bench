@@ -11,7 +11,13 @@ to test is reported, never scored.
 
 Every gap is packed bytes over the reference's: `sum(rars) / sum(ref) - 1`
 over a level's cells, which large members dominate, and the median of the
-per-class gaps beside it. Encode time is the same ratio over encode_ms. The
+per-class gaps beside it. Packed bytes are the `packed_bytes` column, the
+members' compressed data without the headers that name them; the DOS
+references store 8.3 names and rars long ones, and on the small tier that
+difference outweighs the compression being measured. Whole-archive sizes are
+kept beside them as `*_archive_bytes`. A DB from before that column existed
+needs `rars-bench backfill-packed`, or `--archive-bytes` to score whole
+archives on purpose. Encode time is the same ratio over encode_ms. The
 decode column in the DB is the *other* encoder testing the archive, so it
 measures the reference's decoder on rars rows and is not reported.
 """
@@ -36,7 +42,7 @@ def load(paths: list[Path]) -> list[dict]:
     return rows
 
 
-def summarise(rows: list[dict]) -> dict:
+def summarise(rows: list[dict], size: str = "packed_bytes") -> dict:
     cells: dict[tuple, dict] = defaultdict(dict)
     versions: dict[str, set] = defaultdict(set)
     for row in rows:
@@ -61,23 +67,33 @@ def summarise(rows: list[dict]) -> dict:
             continue
         grouped[(fmt, solid, method)].append((corpus, rars, ref))
 
+    unsized = [(fmt, solid, method, corpus) for (fmt, solid, method), group in grouped.items()
+               for corpus, rars, ref in group if rars.get(size) is None or ref.get(size) is None]
+    if unsized:
+        raise SystemExit(f"{len(unsized)} scored cells have no {size}, first {unsized[0]}; "
+                         "run `rars-bench backfill-packed` on the DBs, or pass --archive-bytes")
+    out["size"] = size
+
     for (fmt, solid, method), group in sorted(grouped.items()):
-        mine = sum(r["output_bytes"] for _, r, _ in group)
-        theirs = sum(f["output_bytes"] for _, _, f in group)
-        gaps = {c: r["output_bytes"] / f["output_bytes"] - 1 for c, r, f in group}
+        mine = sum(r[size] for _, r, _ in group)
+        theirs = sum(f[size] for _, _, f in group)
+        gaps = {c: r[size] / f[size] - 1 for c, r, f in group}
         my_ms = sum(r["encode_ms"] or 0 for _, r, _ in group)
         their_ms = sum(f["encode_ms"] or 0 for _, _, f in group)
         level = {
             "cells": len(group),
             "rars_bytes": mine,
             "ref_bytes": theirs,
+            "rars_archive_bytes": sum(r["output_bytes"] for _, r, _ in group),
+            "ref_archive_bytes": sum(f["output_bytes"] for _, _, f in group),
             "gap": mine / theirs - 1,
             "median_gap": statistics.median(gaps.values()),
             "time_ratio": my_ms / their_ms if their_ms else None,
             "rars_ms": my_ms,
             "ref_ms": their_ms,
-            "classes": {c: {"gap": gaps[c], "rars_bytes": r["output_bytes"],
-                            "ref_bytes": f["output_bytes"], "input_bytes": r["input_bytes"],
+            "classes": {c: {"gap": gaps[c], "rars_bytes": r[size], "ref_bytes": f[size],
+                            "rars_archive_bytes": r["output_bytes"],
+                            "ref_archive_bytes": f["output_bytes"], "input_bytes": r["input_bytes"],
                             "rars_ms": r["encode_ms"], "ref_ms": f["encode_ms"]}
                         for c, r, f in group},
         }
@@ -90,6 +106,7 @@ def summarise(rows: list[dict]) -> dict:
 
 def show(summary: dict) -> None:
     print("rars builds:", ", ".join(summary["rars_versions"]))
+    print("scored on:", summary["size"])
     print("references:", ", ".join(summary["references"]))
     for fmt, sections in summary["formats"].items():
         for name, levels in sections.items():
@@ -108,8 +125,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("db", type=Path, nargs="+")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--archive-bytes", action="store_true",
+                        help="score whole archives, headers and member names included")
     args = parser.parse_args()
-    summary = summarise(load(args.db))
+    summary = summarise(load(args.db), "output_bytes" if args.archive_bytes else "packed_bytes")
     if len(summary["rars_versions"]) > 1:
         print("warning: more than one rars build across these DBs; the comparison mixes binaries")
     show(summary)
