@@ -47,10 +47,15 @@ class RarsDriver:
             cmd.extend(["--password", variant.password])
         if variant.volume_size is not None:
             cmd.extend(["--volume-size", str(variant.volume_size)])
-        cmd.append(str(out_archive))
-        cmd.extend(str(p) for p in inputs)
+        # Run from the inputs' common directory and name them relative to it,
+        # so members are stored as bare names the way the references store
+        # them (`-ep1` under wine, the DOS session directory under DOSBox),
+        # not as the harness's own corpora/<class>/ path.
+        base = Path(os.path.commonpath([p.resolve().parent for p in inputs])) if inputs else None
+        cmd.append(str(out_archive.resolve()))
+        cmd.extend(str(p.resolve().relative_to(base)) if base else str(p) for p in inputs)
 
-        proc, ms, rss = run_timed(cmd)
+        proc, ms, rss = run_timed(cmd, cwd=base)
         archive_bytes = out_archive.stat().st_size if out_archive.exists() else 0
         return EncodeResult(
             archive_path=out_archive,

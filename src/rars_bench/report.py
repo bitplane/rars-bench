@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import html
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+from .schema import connect_read
 
 #: Archives smaller than this make the relative gap meaningless.
 DEGENERATE_BYTES = 64 * 1024
@@ -43,20 +44,31 @@ class Section:
     methods: list[int]
     classes: list[str]
     cells: dict[tuple[str, int], dict[str, tuple[int, int]]]
+    measure: str
 
 
 def load(db_path: Path, label: str | None = None) -> Section:
-    db = sqlite3.connect(db_path)
-    cells: dict[tuple[str, int], dict[str, tuple[int, int]]] = {}
-    for corpus_class, encoder, method, input_bytes, output_bytes in db.execute(
-        "select corpus_class, encoder, method, input_bytes, output_bytes from runs"
-    ):
-        cells.setdefault((corpus_class, method), {})[encoder] = (input_bytes, output_bytes)
+    db = connect_read(db_path)
+    rows = db.execute(
+        "select corpus_class, encoder, method, input_bytes, output_bytes, packed_bytes,"
+        " roundtrip_status from runs"
+    ).fetchall()
     versions = dict(db.execute("select distinct encoder, encoder_version from runs"))
     row = db.execute("select distinct format from runs").fetchone()
     db.close()
-    if not cells:
+    if not rows:
         raise SystemExit(f"no rows in {db_path}")
+    # Packed bytes measure the encoder; archive bytes also count each side's
+    # member names. A DB from before packed_bytes existed, and not backfilled,
+    # falls back to archive bytes as a whole rather than cell by cell, so no
+    # total mixes the two.
+    packed = all(r[5] is not None for r in rows if r[6] == "ok")
+    cells: dict[tuple[str, int], dict[str, tuple[int, int]]] = {}
+    for corpus_class, encoder, method, input_bytes, output_bytes, packed_bytes, _ in rows:
+        size = packed_bytes if packed else output_bytes
+        cell = cells.setdefault((corpus_class, method), {})
+        if size is not None:
+            cell[encoder] = (input_bytes, size)
     oracle = next((e for e in versions if e != "rars"), "rar")
     return Section(
         label=label or db_path.stem,
@@ -66,6 +78,7 @@ def load(db_path: Path, label: str | None = None) -> Section:
         methods=sorted({m for _, m in cells}),
         classes=sorted({c for c, _ in cells}),
         cells=cells,
+        measure="packed bytes" if packed else "archive bytes",
     )
 
 
@@ -198,7 +211,7 @@ def _table(section: Section) -> str:
     <h2>{html.escape(section.label)}</h2>
     <p class="block-sub">{html.escape(section.fmt)} against
       {html.escape(section.oracle)} {html.escape(section.oracle_version)},
-      {len(section.classes)} classes</p>
+      {len(section.classes)} classes, {section.measure}</p>
     <div class="scroll">
       <table>
         <thead><tr><th>corpus class</th>{heads}</tr></thead>
@@ -353,8 +366,10 @@ def render(db_paths: list[tuple[Path, str | None]], title: str | None = None) ->
     <h1>{html.escape(title)}</h1>
     <p class="lede">
       Every bar runs from the centre line.
-      <strong class="worse-text">Right</strong> means our archive is bigger than
-      WinRAR's; <strong class="better-text">left</strong> means smaller. The scale
+      <strong class="worse-text">Right</strong> means our compressed members are
+      bigger than WinRAR's; <strong class="better-text">left</strong> means smaller.
+      Sizes are the members' packed bytes, leaving out the headers that hold
+      their names, unless a section says archive bytes. The scale
       clamps at &plusmn;{MAX_PLOTTED_GAP:g}%, and clamped bars are drawn faint.
     </p>
   </header>

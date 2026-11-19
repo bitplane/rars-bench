@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS runs (
     decode_ms        REAL,
     decode_peak_rss  INTEGER,
     roundtrip_status TEXT,                     -- 'ok' | 'decode_failed' | 'wrong_bytes' | 'encode_failed'
-    rars_internal    TEXT                      -- JSON sidecar from `rars a --report-json`, or NULL
+    rars_internal    TEXT,                     -- JSON sidecar from `rars a --report-json`, or NULL
+    packed_bytes     INTEGER                   -- sum of the members' packed sizes; NULL if unreadable
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_variant
@@ -38,9 +39,39 @@ CREATE INDEX IF NOT EXISTS idx_runs_run_id
 """
 
 
+#: Columns added after the first DBs were written, with their types. init_db
+#: adds any that an older DB lacks, so its rows read as NULL rather than the
+#: DB being refused.
+ADDED_COLUMNS = {"packed_bytes": "INTEGER"}
+
+
 def init_db(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
+    migrate(conn)
     conn.commit()
+    return conn
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    for name, kind in ADDED_COLUMNS.items():
+        if name not in present:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {kind}")
+
+
+def connect_read(path: Path) -> sqlite3.Connection:
+    """Open a results DB for reading, with every current column present.
+
+    A DB written before a column was added gets a temporary `runs` view that
+    supplies it as NULL. The view lives in the connection's temp schema, which
+    sqlite searches before the file's, so the file itself is not changed.
+    """
+    conn = sqlite3.connect(path)
+    present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    missing = [name for name in ADDED_COLUMNS if name not in present]
+    if present and missing:
+        extra = ", ".join(f"NULL AS {name}" for name in missing)
+        conn.execute(f"CREATE TEMP VIEW runs AS SELECT *, {extra} FROM main.runs")
     return conn

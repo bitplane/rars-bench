@@ -1,4 +1,4 @@
-"""rars-bench CLI entry point — `sweep` and `triage` subcommands."""
+"""rars-bench CLI entry point — `sweep`, `triage`, `report` and `backfill-packed`."""
 import argparse
 import os
 import shutil
@@ -166,12 +166,26 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", type=Path, default=Path("results/report.html"))
     r.add_argument("--title", default=None)
 
+    b = sub.add_parser(
+        "backfill-packed",
+        help="fill packed_bytes on old rows from the archives still in the work tree",
+    )
+    b.add_argument("db", type=Path, nargs="+")
+    b.add_argument(
+        "--work-root",
+        type=Path,
+        default=None,
+        help="the sweep's work tree; defaults to work/ beside each DB",
+    )
+
     args = p.parse_args(argv)
 
     if args.cmd == "sweep":
         return _cmd_sweep(args)
     if args.cmd == "triage":
         return _triage.run(args.db, args.by, args.top)
+    if args.cmd == "backfill-packed":
+        return _cmd_backfill(args)
     if args.cmd == "report":
         from . import report as _report
 
@@ -235,6 +249,25 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         skip_unavailable=args.skip_missing_drivers,
     )
     print(f"wrote {rows} rows to {args.out}")
+    return 0
+
+
+def _cmd_backfill(args: argparse.Namespace) -> int:
+    from .packed import backfill
+
+    keys = {
+        (v.format, v.method_int, v.filter, int(v.solid), int(v.encrypted), v.dict_log): v.key
+        for sets in _VARIANT_SETS.values()
+        for variants in sets.values()
+        for v in variants
+    }
+    for db in args.db:
+        if not db.is_file():
+            print(f"error: {db} not found", file=sys.stderr)
+            return 2
+        work_root = args.work_root or db.parent / "work"
+        filled, missing = backfill(db, work_root, keys)
+        print(f"{db}: filled {filled} rows, {missing} without a readable archive")
     return 0
 
 
