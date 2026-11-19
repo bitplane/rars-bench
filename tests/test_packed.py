@@ -250,6 +250,9 @@ def test_matches_rars_info(rars_bin, tiny_corpus, tmp_path, fmt, method, level):
     archive = tmp_path / "out.rar"
     enc = RarsDriver(rars_bin).compress(variant, inputs, archive)
     assert enc.exit_code == 0, enc.stderr
-    expected, _ = _info_packed(rars_bin, archive)
+    expected, names = _info_packed(rars_bin, archive)
     assert packed_bytes(archive) == expected
     assert packed_bytes(archive) < enc.archive_bytes
+    # The driver runs rars from the inputs' directory, so members carry bare
+    # names the way the references store them, not the harness's path.
+    assert names == [p.name for p in inputs]
