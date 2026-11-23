@@ -50,7 +50,8 @@ def banner(cmd: list[str], pattern: str = r"\S.*\d+\.\d+.*") -> str:
     text = (done.stdout + done.stderr).decode("utf-8", "replace")
     for line in text.splitlines():
         if re.search(pattern, line):
-            return line.strip()
+            # "RAR 7.12   Copyright (c) ..." -> "RAR 7.12"
+            return re.split(r"\s{2,}|,? [Cc]opyright", line.strip())[0]
     return text.strip().splitlines()[0] if text.strip() else "unknown"
 
 
