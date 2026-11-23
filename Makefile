@@ -1,3 +1,5 @@
+
+.PHONY: fetch-rarfast release-bench release-bench-tiny
 .PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-all sweep-large report copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
@@ -137,3 +139,33 @@ clean:
 
 docs:
 	@echo "docs target not yet wired up"
+
+# rarfast, the third-party peer the release bench times against. Pinned by
+# hash; the binary lands in _refs/, which is never committed.
+RARFAST_URL := https://github.com/nzbfast/rarfast/releases/download/rarfast-v0.9.0/rarfast-0.9.0-linux-x86_64.tar.gz
+RARFAST_SHA256 := 17f26463edc119d6d498d244c229b23ada6aada23e33cae298435f15f68dbe5b
+fetch-rarfast: _refs/rarfast/rarfast
+
+_refs/rarfast/rarfast:
+	mkdir -p _refs/rarfast
+	curl -sSL -o _refs/rarfast/rarfast.tar.gz $(RARFAST_URL)
+	echo "$(RARFAST_SHA256)  _refs/rarfast/rarfast.tar.gz" | sha256sum -c -
+	tar -xzf _refs/rarfast/rarfast.tar.gz -C _refs/rarfast --strip-components=1
+	chmod +x $@
+
+# The release bench: one fixed scenario set, results/release-*.{json,md}.
+# RARS_BIN must name the pinned build under test. RELEASE_ARGS passes more,
+# e.g. RELEASE_ARGS="--cache /big/disk/cache --only create-rar5".
+# Corpora and wineprefixes are made only when missing: reseeding rewrites the
+# corpora (large-source-tree follows the rars checkout, so it would change the
+# input between two runs) and copy-refbins re-copies 7 GB of prefixes.
+release-bench: install fetch-rarfast
+	@test -n "$(RARS_BIN)" || { echo "set RARS_BIN to the rars build under test"; exit 2; }
+	@test -d corpora/large-text || $(MAKE) seed-all
+	@test -d _refs/wineprefixes/winrar602 || $(MAKE) copy-refbins
+	$(RARS_BENCH) release --rars-bin "$(RARS_BIN)" $(RELEASE_ARGS)
+
+# Seconds per scenario, to prove the runner end to end; measures nothing.
+release-bench-tiny: install fetch-rarfast
+	@test -n "$(RARS_BIN)" || { echo "set RARS_BIN to the rars build under test"; exit 2; }
+	$(RARS_BENCH) release --scale tiny --rars-bin "$(RARS_BIN)" --formats rar20,rar50 --sweep-classes logs $(RELEASE_ARGS)

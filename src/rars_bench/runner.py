@@ -56,13 +56,15 @@ def sweep(
     cache_root: Path | None = None,
     run_id: str | None = None,
     skip_unavailable: bool = False,
+    cross_decoder: Driver | None = None,
 ) -> int:
     """Run each variant × corpus_class × encoder, write rows, return row count.
 
     For each (variant, corpus_class, encoder), the encoder produces ONE archive
     containing every file in corpora/<corpus_class>/ (multi-member). The
     cross-decoder is the next available driver in the list that isn't itself;
-    if none, we self-decode.
+    if none, we self-decode. `cross_decoder`, when given, tests rars' archives
+    instead (the release bench passes native unrar, so no wine starts per cell).
     """
     available_drivers = [d for d in drivers if d.available()]
     if not available_drivers:
@@ -91,7 +93,11 @@ def sweep(
 
                 input_shas = [item.sha256 for item in items]
                 for encoder in available_drivers:
-                    decoder = _pick_decoder(encoder, available_drivers)
+                    decoder = (
+                        cross_decoder
+                        if cross_decoder is not None and encoder.name == "rars"
+                        else _pick_decoder(encoder, available_drivers)
+                    )
                     enc, test_exit, test_ms = _run_cell(
                         encoder=encoder,
                         decoder=decoder,

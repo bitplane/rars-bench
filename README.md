@@ -126,6 +126,24 @@ The rars binary is found via `$RARS_BIN`, then a sibling `../rars` checkout,
 then `~/src/rars`. Set `$RARS_REPO` for the seeder if the checkout is
 somewhere else again.
 
+## The release bench
+
+```sh
+make release-bench RARS_BIN=/path/to/pinned/rars
+rars-bench release-compare results/release-A.json results/release-B.json
+```
+
+One fixed scenario set (`src/rars_bench/release/`) that answers speed, peak
+memory, size and correctness against RAR per scenario: stored volume sets,
+a 1 GiB RAR 5 member at 1, 4 and 16 threads, 20,000 small files, a seeded
+DiscMaster sample tested against unrar's verdict, RAR 5 and RAR 4 writing at
+matched levels and threads, and the format sweep above for every format.
+Timing compares only native binaries (rar 7.12, rar 3.93, unrar, rarfast).
+Inputs are generated from `/usr` and seeded random data into `.release/cache`
+and reused. `--scale tiny` runs it all in a few minutes to check the runner.
+Output is `results/release-<date>-<commit>-<scale>.{json,md}`, with every
+format-sweep cell in `format-cells.tsv` beside them, worst gap first.
+
 ## Result schema
 
 See `src/rars_bench/schema.py`. One row per (encoder × variant × corpus_path)
