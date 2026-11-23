@@ -16,3 +16,6 @@ results/*
 # reference RAR binaries — copied locally, never pushed
 _refs/*
 !_refs/**/.gitkeep
+
+# release bench inputs and scratch (rars-bench release)
+.release/

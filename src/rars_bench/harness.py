@@ -1,4 +1,4 @@
-"""rars-bench CLI entry point — `sweep`, `triage`, `report` and `backfill-packed`."""
+"""rars-bench CLI entry point: `sweep`, `triage`, `report`, `backfill-packed`, `release` and `release-compare`."""
 import argparse
 import os
 import shutil
@@ -178,7 +178,16 @@ def main(argv: list[str] | None = None) -> int:
         help="the sweep's work tree; defaults to work/ beside each DB",
     )
 
+    from .release import cli as _release
+
+    _release.add_parsers(sub)
+
     args = p.parse_args(argv)
+
+    if args.cmd == "release":
+        return _release.run(args)
+    if args.cmd == "release-compare":
+        return _release.run_compare(args)
 
     if args.cmd == "sweep":
         return _cmd_sweep(args)
