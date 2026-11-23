@@ -169,7 +169,8 @@ def run(args: argparse.Namespace) -> int:
     stem = f"release-{meta['date'][:10]}-{commit}-{args.scale}"
     args.out_dir.mkdir(parents=True, exist_ok=True)
     run_dir = args.out_dir / stem
-    run_dir.mkdir(exist_ok=True)
+    if not args.prepare:
+        run_dir.mkdir(exist_ok=True)
     ctx = Ctx(tools=tools, inputs=Inputs(args.cache.resolve(), scale), scale=scale, rounds=meta["rounds"],
               timeout=args.timeout, dm_timeout=min(args.timeout, 300.0), run_dir=run_dir,
               scratch_root=args.scratch.resolve())
