@@ -126,6 +126,21 @@ The rars binary is found via `$RARS_BIN`, then a sibling `../rars` checkout,
 then `~/src/rars`. Set `$RARS_REPO` for the seeder if the checkout is
 somewhere else again.
 
+## The quick tier
+
+```sh
+rars-bench quick --rars-bin /path/to/rars
+```
+
+Deterministic only, so a loaded machine does not matter. Every format rars
+writes, levels 1-5, solid and not, over the corpus classes: packed bytes
+against the format's era reference from the oracle cache (encoded once under
+wine or DOSBox when missing), `unrar t` on every archive rars wrote, the level
+ladder (level n must not pack larger than level n-1) and thread identity (the
+`large-*` and `edge-*` classes again at `tmax`, which must give the same
+bytes as `--threads 1`). A broken check is listed and the exit status is 1.
+It writes `<machine-id>-quick.json` into the history store.
+
 ## The release bench
 
 ```sh
