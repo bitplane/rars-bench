@@ -166,6 +166,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", type=Path, default=Path("results/report.html"))
     r.add_argument("--title", default=None)
 
+    e = sub.add_parser("seed-edge", help="write the synthetic edge-case classes (corpora/edge-*)")
+    e.add_argument("--corpora-root", type=Path, default=Path("corpora"))
+    e.add_argument("--only", default=None, help="comma list of edge classes")
+
     b = sub.add_parser(
         "backfill-packed",
         help="fill packed_bytes on old rows from the archives still in the work tree",
@@ -181,6 +185,13 @@ def main(argv: list[str] | None = None) -> int:
     from .release import cli as _release
 
     _release.add_parsers(sub)
+    from .history import cli as _history
+
+    _history.add_parsers(sub)
+    _history.add_report_parser(sub)
+    from . import quick as _quick
+
+    _quick.add_parsers(sub)
 
     args = p.parse_args(argv)
 
@@ -188,9 +199,21 @@ def main(argv: list[str] | None = None) -> int:
         return _release.run(args)
     if args.cmd == "release-compare":
         return _release.run_compare(args)
+    if args.cmd == "quick":
+        return _quick.run(args)
+    if args.cmd == "history":
+        return _history.run_report(args)
+    if args.cmd == "history-import":
+        return _history.run_import(args)
 
     if args.cmd == "sweep":
         return _cmd_sweep(args)
+    if args.cmd == "seed-edge":
+        from .synth import seed_edge
+
+        for cls, digest in seed_edge(args.corpora_root, args.only.split(",") if args.only else None).items():
+            print(f"  {cls:18} {digest[:16]}")
+        return 0
     if args.cmd == "triage":
         return _triage.run(args.db, args.by, args.top)
     if args.cmd == "backfill-packed":
@@ -284,6 +307,8 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
 #: past a modern writer's dictionary and block sizes. The rest of the corpus
 #: caps files at 64 KiB, which was sized for the RAR 1.4 sweep.
 LARGE_TIER_PREFIX = "large-"
+#: The synthetic edge-case classes (`synth.py`): up to 4 MiB, so not small-tier either.
+EDGE_PREFIX = "edge-"
 
 
 def _resolve_corpus_classes(arg: list[str] | None, corpora_root: Path) -> list[str]:
@@ -298,7 +323,7 @@ def _resolve_corpus_classes(arg: list[str] | None, corpora_root: Path) -> list[s
     if not arg:
         arg = ["all"]
     if not corpora_root.is_dir():
-        return [] if {"all", "small", "large"} & set(arg) else list(arg)
+        return [] if {"all", "small", "large", "edge"} & set(arg) else list(arg)
     present = sorted(p.name for p in corpora_root.iterdir() if p.is_dir())
 
     resolved: list[str] = []
@@ -308,7 +333,9 @@ def _resolve_corpus_classes(arg: list[str] | None, corpora_root: Path) -> list[s
         elif selector == "large":
             resolved.extend(c for c in present if c.startswith(LARGE_TIER_PREFIX))
         elif selector == "small":
-            resolved.extend(c for c in present if not c.startswith(LARGE_TIER_PREFIX))
+            resolved.extend(c for c in present if not c.startswith((LARGE_TIER_PREFIX, EDGE_PREFIX)))
+        elif selector == "edge":
+            resolved.extend(c for c in present if c.startswith(EDGE_PREFIX))
         else:
             resolved.append(selector)
     return sorted(dict.fromkeys(resolved))

@@ -86,7 +86,15 @@ show (+11% to +30%).
 | `large-incompressible` | already-compressed `.zst` / `.xz`                            |
 | `large-compressible`   | long runs and a repeating phrase                             |
 
-Both tiers are throwaway and gitignored. Everything is seeded from local files
+**Edge classes** (`make seed-edge`, selector `edge`). One seeded synthetic
+file each, at most 4 MiB, for the shapes rars handles specially: `edge-pcm8-mono`,
+`edge-pcm8-stereo`, `edge-pcm16-mono`, `edge-pcm16-stereo` (tones plus noise),
+`edge-rgb24` (noisy ramps), `edge-grey` (noisy gradient), `edge-records` (a
+16-byte struct table), `edge-repeats` (an 8 KiB period with zero runs) and
+`edge-random`. Built from integers only, so the bytes match on every machine.
+`small` leaves them out, so the DOS references never see them; `all` has them.
+
+All three are throwaway and gitignored. Everything is seeded from local files
 or generated deterministically, so reseeding produces identical bytes and the
 oracle encode cache stays valid.
 
@@ -126,6 +134,21 @@ The rars binary is found via `$RARS_BIN`, then a sibling `../rars` checkout,
 then `~/src/rars`. Set `$RARS_REPO` for the seeder if the checkout is
 somewhere else again.
 
+## The quick tier
+
+```sh
+rars-bench quick --rars-bin /path/to/rars
+```
+
+Deterministic only, so a loaded machine does not matter. Every format rars
+writes, levels 1-5, solid and not, over the corpus classes: packed bytes
+against the format's era reference from the oracle cache (encoded once under
+wine or DOSBox when missing), `unrar t` on every archive rars wrote, the level
+ladder (level n must not pack larger than level n-1) and thread identity (the
+`large-*` and `edge-*` classes again at `tmax`, which must give the same
+bytes as `--threads 1`). A broken check is listed and the exit status is 1.
+It writes `<machine-id>-quick.json` into the history store.
+
 ## The release bench
 
 ```sh
@@ -143,6 +166,38 @@ Inputs are generated from `/usr` and seeded random data into `.release/cache`
 and reused. `--scale tiny` runs it all in a few minutes to check the runner.
 Output is `results/release-<date>-<commit>-<scale>.{json,md}`, with every
 format-sweep cell in `format-cells.tsv` beside them, worst gap first.
+
+## History store
+
+`results/<rars version or tag>/<machine-id>-<tier>.json`, committed. Each file
+holds the machine's profile (CPU, L3 domains, the CPU set each thread count ran
+on, kernel, filesystem, load at start and end), every tool's version and
+sha256, and one entry per cell with its raw metrics and its ratios to the
+reference tool from the same run. Cells are keyed by thread label (`t1`, `t4`,
+`tmax`), not thread count, so they line up across machines; ratios compare
+across machines, raw times and memory only on the same one. The machine id is
+a CPU-model slug plus a hash of `/etc/machine-id`.
+
+References are entries in `src/rars_bench/registry.py`: a name, how to find the
+binary, how to read its version, and the cells it is the reference for. A
+cell's ratios line up across results only against the same tool name, and a
+tool whose version or hash changed between two results is flagged.
+
+`rars-bench release` writes one (`-timed.json`) beside its usual output.
+`rars-bench history-import` files an older release-bench JSON into the store.
+
+```sh
+rars-bench history --tier quick --changed-only > history.md
+```
+
+renders cells against versions for one machine (this one, or `--machine`):
+packed bytes and size ratio, time and peak-RSS ratios, pass/fail. Values
+that moved since the previous version are bold: sizes on any change, ratios
+past `--threshold` (5%). `--other-machines` fills versions this machine has
+no record for from other machines, marked ratio-only.
+
+Anything else in `results/` (`release-*.json`, `*.db`, run directories)
+predates this layout, stays local and is ignored by git.
 
 ## Result schema
 

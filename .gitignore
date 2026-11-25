@@ -13,9 +13,18 @@ corpora
 !corpora/.gitkeep
 results/*
 !results/.gitkeep
+# ...except the history store: results/<version>/<machine-id>-<tier>.json
+!results/*/
+results/*/*
+!results/*/*-quick.json
+!results/*/*-timed.json
 # reference RAR binaries — copied locally, never pushed
 _refs/*
 !_refs/**/.gitkeep
 
 # release bench inputs and scratch (rars-bench release)
 .release/
+
+# --rars-ref clones and builds (rars-bench build.py)
+.rars-builds/
+.quick/

@@ -13,6 +13,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..history import machine as _machine
+from ..history import store as _store
 from . import discmaster, formats, report
 from .inputs import Inputs
 from .measure import banner, git_commit, sha256_file
@@ -26,7 +28,7 @@ SCALES = {
     # 64 MiB put a quarter of an hour into that one row.
     "full": {
         "volume_bytes": 2 * GIB, "volume_size": "100m", "big_bytes": GIB, "small_files": 20000,
-        "class_bytes": 32 * MIB, "random_bytes": GIB, "read_threads": [1, 4, 16],
+        "class_bytes": 32 * MIB, "random_bytes": GIB, "read_threads": lambda many: [1, 4, many],
         "create_levels": [1, 3, 5], "create_threads": lambda many: [1, many],
         "random_cells": lambda many: [(many, [1, 3, 5]), (1, [3])],
         "rounds": 3, "dm_count": 3000, "dm_max_bytes": 16 * MIB, "dm_seed": 368, "dm_rounds": 2,
@@ -34,7 +36,7 @@ SCALES = {
     # Seconds per scenario: proves the runner end to end, measures nothing.
     "tiny": {
         "volume_bytes": 8 * MIB, "volume_size": "1m", "big_bytes": 8 * MIB, "small_files": 200,
-        "class_bytes": 2 * MIB, "random_bytes": 8 * MIB, "read_threads": [1, 2],
+        "class_bytes": 2 * MIB, "random_bytes": 8 * MIB, "read_threads": lambda many: [1, min(4, many)],
         "create_levels": [1, 5], "create_threads": lambda many: [1, many],
         "random_cells": lambda many: [(many, [3]), (1, [3])],
         "rounds": 2, "dm_count": 20, "dm_max_bytes": MIB, "dm_seed": 368, "dm_rounds": 1,
@@ -57,6 +59,7 @@ class Ctx:
     scratch_root: Path
     scratch: Path = field(default=None)
     log: object = print
+    pinning: object = None
 
 
 def add_parsers(sub) -> None:
@@ -68,7 +71,9 @@ def add_parsers(sub) -> None:
         return local if local.is_file() else rar_repo / "_refs/rarbins" / name
 
     r = sub.add_parser("release", help="the release bench: speed, memory, size and correctness against RAR")
-    r.add_argument("--rars-bin", type=Path, required=True, help="the build under test; pin it")
+    r.add_argument("--rars-bin", type=Path, default=None, help="the build under test; pin it")
+    from ..build import add_args as add_build_args
+    add_build_args(r)
     r.add_argument("--rars-commit", default=None, help="override the commit read from the binary's checkout")
     r.add_argument("--rar-bin", type=Path, default=ref("rar712-linux-x64"), help="native rar 7.12")
     r.add_argument("--rar393-bin", type=Path, default=ref("rar393-linux-x64"), help="native rar 3.93")
@@ -96,6 +101,7 @@ def add_parsers(sub) -> None:
     r.add_argument("--wineprefix-root", type=Path, default=Path("_refs/wineprefixes"))
     r.add_argument("--cache-root", type=Path, default=Path("_refs/cache"), help="oracle encode cache")
     r.add_argument("--no-oracle-cache", action="store_true")
+    add_history_args(r)
 
     c = sub.add_parser("release-compare", help="markdown diff of two release-bench JSON files")
     c.add_argument("old", type=Path)
@@ -104,50 +110,66 @@ def add_parsers(sub) -> None:
     c.add_argument("--threshold", type=float, default=0.05)
 
 
+def add_history_args(p) -> None:
+    p.add_argument("--history-root", type=Path, default=Path("results"),
+                   help="history store: writes <root>/<label>/<machine-id>-<tier>.json")
+    p.add_argument("--label", default=None,
+                   help="version directory in the history store (default: the tag the build sits on, "
+                        "else its commit's first 8 hex digits)")
+    p.add_argument("--note", default=None, help="free text kept in the history record, e.g. what the build is")
+    p.add_argument("--no-history", action="store_true", help="write no history record")
+
+
+def default_label(rars: dict) -> str:
+    """The tag the binary's checkout sits on, else its commit, else its hash."""
+    if rars.get("tag"):
+        return rars["tag"]
+    checkout = rars.get("checkout")
+    if checkout and not rars.get("dirty"):
+        import subprocess
+        done = subprocess.run(["git", "-C", checkout, "describe", "--tags", "--exact-match", "HEAD"],
+                              capture_output=True, text=True)
+        if done.returncode == 0 and done.stdout.strip():
+            return done.stdout.strip()
+    return (rars.get("commit") or rars.get("sha256") or "unknown")[:8]
+
+
 def _optional(path: Path | None) -> Path | None:
     return path.resolve() if path is not None and path.is_file() and os.access(path, os.X_OK) else None
 
 
 def describe_tools(args, tools: Tools) -> dict:
-    out = {}
+    """rars, every registered reference (see `registry.py`), and rarfast, which is timed but no reference."""
+    from .. import registry
     rars = {"path": str(tools.rars), "sha256": sha256_file(tools.rars),
-            "version": banner([str(tools.rars), "--version"]), **git_commit(tools.rars)}
+            "version": banner([str(tools.rars), "--version"]),
+            **(getattr(args, "rars_build", None) or git_commit(tools.rars))}
     if args.rars_commit:
         rars.update(commit=args.rars_commit, subject="(given with --rars-commit)", dirty=False)
-    out["rars"] = rars
-    for name, cmd in (("rar", [str(tools.rar)] if tools.rar else None),
-                      ("rar393", [str(tools.rar393)] if tools.rar393 else None),
-                      ("unrar", [str(tools.unrar)] if tools.unrar else None),
-                      ("rarfast", [str(tools.rarfast), "--version"] if tools.rarfast else None)):
-        if cmd is None:
-            out[name] = {"version": "not found"}
-            continue
-        path = Path(cmd[0])
-        out[name] = {"path": str(path), "sha256": sha256_file(path), "version": banner(cmd)}
-    # The sweep's references, which only ever give sizes and verdicts.
-    for fmt, cfg in __import__("rars_bench.harness", fromlist=["_WINE_ORACLES"])._WINE_ORACLES.items():
-        exe = args.wineprefix_root / cfg.prefix_subdir / cfg.rar_relpath
-        out[f"sweep-{fmt}"] = {"version": f"WinRAR {cfg.version} (wine; sizes only)", "path": str(exe),
-                               "sha256": sha256_file(exe) if exe.is_file() else "missing"}
-    for fmt, exe, label in (("rar14", args.rar1402_bin, "RAR 1.402"), ("rar20", args.rar250_bin, "RAR 2.50")):
-        out[f"sweep-{fmt}"] = {"version": f"{label} (DOSBox-X; sizes only)", "path": str(exe),
-                               "sha256": sha256_file(exe) if exe.is_file() else "missing"}
-    for name, cmd in (("wine", ["wine", "--version"]), ("dosbox-x", ["dosbox-x", "-version"])):
-        if shutil.which(cmd[0]):
-            out[name] = {"version": banner(cmd, r".")}
+    out = {"rars": rars, **registry.describe(args)}
+    if tools.rarfast:
+        out["rarfast"] = {"path": str(tools.rarfast), "sha256": sha256_file(tools.rarfast),
+                          "version": banner([str(tools.rarfast), "--version"]), "runs": "native"}
+    else:
+        out["rarfast"] = {"version": "not found"}
     return out
 
 
 def run(args: argparse.Namespace) -> int:
-    rars = _optional(args.rars_bin)
+    from ..build import resolve_rars
+    found = resolve_rars(args)
+    rars = _optional(found)
     if rars is None:
-        print(f"error: no rars binary at {args.rars_bin}", file=sys.stderr)
+        print(f"error: no rars binary at {found or args.rars_bin}; pass --rars-bin or --rars-ref", file=sys.stderr)
         return 2
     scale = SCALES[args.scale]
+    usable = _machine.avoid_cpu0()
+    many = args.threads or len(usable)
+    pinning = _machine.Pinning(usable, many)
     rar = _optional(args.rar_bin)
     tools = Tools(rars=rars, rar=rar, rar_sha=sha256_file(rar) if rar else "", rar393=_optional(args.rar393_bin),
                   unrar=_optional(args.unrar_bin), rarfast=_optional(args.rarfast_bin),
-                  many=args.threads or len(os.sched_getaffinity(0)))
+                  many=many)
     chosen = args.only.split(",") if args.only else list(ALL)
     chosen = [s for s in chosen if s not in set(filter(None, args.skip.split(",")))]
     unknown = set(chosen) - set(ALL)
@@ -159,11 +181,16 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     started = time.time()
+    machine = _machine.profile(args.scratch, allowed=usable)
+    machine["cpu_sets"] = pinning.labels()
+    machine["pinned"] = True
+    load_start = _machine.load_snapshot()
     meta = {"date": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "scale": args.scale,
             "scale_params": {k: v for k, v in scale.items() if not callable(v)},
             "rounds": args.rounds or scale["rounds"], "threads_available": tools.many,
             "host": {"kernel": platform.release(), "python": platform.python_version(),
                      "cpus": os.cpu_count()},
+            "machine": machine, "load": {"start": load_start},
             "tools": describe_tools(args, tools), "scenarios_run": chosen}
     commit = (meta["tools"]["rars"].get("commit") or meta["tools"]["rars"]["sha256"])[:8]
     stem = f"release-{meta['date'][:10]}-{commit}-{args.scale}"
@@ -173,7 +200,7 @@ def run(args: argparse.Namespace) -> int:
         run_dir.mkdir(exist_ok=True)
     ctx = Ctx(tools=tools, inputs=Inputs(args.cache.resolve(), scale), scale=scale, rounds=meta["rounds"],
               timeout=args.timeout, dm_timeout=min(args.timeout, 300.0), run_dir=run_dir,
-              scratch_root=args.scratch.resolve())
+              scratch_root=args.scratch.resolve(), pinning=pinning)
     result = {"meta": meta, "scenarios": [], "cells_tsv": str(run_dir / "format-cells.tsv")}
     json_path, md_path = args.out_dir / f"{stem}.json", args.out_dir / f"{stem}.md"
 
@@ -230,12 +257,18 @@ def run(args: argparse.Namespace) -> int:
             json_path.write_text(json.dumps(result, indent=1, default=str))
 
     meta["elapsed_s"] = time.time() - started
+    meta["load"]["end"] = _machine.load_snapshot()
     if args.prepare:
         print(f"prepared inputs in {args.cache} in {meta['elapsed_s'] / 60:.1f} min")
         return 1 if any("error" in s for s in result["scenarios"]) else 0
     json_path.write_text(json.dumps(result, indent=1, default=str))
     report.write(md_path, report.render(result))
     print(f"wrote {json_path} and {md_path} in {meta['elapsed_s'] / 60:.1f} min")
+    if not args.no_history:
+        record = _store.from_release(json.loads(json.dumps(result, default=str)),
+                                     label=args.label or default_label(meta["tools"]["rars"]), machine=machine,
+                                     load=meta["load"], note=args.note)
+        print(f"history: {_store.write(args.history_root, record)}")
     return 1 if any("error" in s for s in result["scenarios"]) else 0
 
 

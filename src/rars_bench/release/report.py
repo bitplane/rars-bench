@@ -54,6 +54,7 @@ def render(result: dict) -> str:
             f"{' (dirty)' if rars.get('dirty') else ''} {rars.get('subject', '')}, binary sha256 "
             f"`{rars['sha256'][:16]}`. Scale `{meta['scale']}`, {meta['rounds']} rounds, "
             f"{meta['threads_available']} threads available, total {meta['elapsed_s'] / 60:.1f} min.", ""]
+    out += host_lines(meta)
     out += ["| tool | version | sha256 |", "|---|---|---|"]
     for name, t in meta["tools"].items():
         out.append(f"| {name} | {t.get('version', '-')} | `{t.get('sha256', '-')[:16]}` |")
@@ -97,6 +98,22 @@ def render(result: dict) -> str:
         if "sweep" in sc:
             out += sweep_md(sc["sweep"], result.get("cells_tsv"))
     return "\n".join(out) + "\n"
+
+
+def host_lines(meta: dict) -> list[str]:
+    """The CPU sets each thread label ran on, and a warning when the machine was busy."""
+    from ..history.machine import load_warning
+    machine, load = meta.get("machine"), meta.get("load") or {}
+    if not machine:
+        return []
+    sets = machine.get("cpu_sets") or {}
+    out = [f"Machine `{machine['id']}`, {machine.get('cpu_model')}, {machine.get('logical_cpus')} logical CPUs; "
+           + ", ".join(f"{k} on CPUs {v}" for k, v in sets.items()) + ".", ""]
+    for when in ("start", "end"):
+        warning = load_warning(load.get(when), machine.get("logical_cpus") or 1, use_loadavg=when == "start")
+        if warning:
+            out += [f"**Busy machine at the {when}:** {warning}. Timings may be inflated.", ""]
+    return out
 
 
 def medians(result: dict) -> list[str]:
@@ -184,6 +201,13 @@ def compare(old: dict, new: dict, threshold: float = 0.05) -> str:
     for side, m in (("old", old["meta"]), ("new", new["meta"])):
         refs = ", ".join(f"{n} {t.get('version', '-')}" for n, t in m["tools"].items() if n != "rars")
         out.append(f"- {side}: scale {m['scale']}, {m['rounds']} rounds; {refs}")
+    from ..history.store import tools_from_meta
+    from ..registry import tool_changes
+    changed = tool_changes(*(tools_from_meta({k: v for k, v in m["tools"].items() if k != "rars"})
+                             for m in (old["meta"], new["meta"])))
+    if changed:
+        out += ["", "**Tools changed between the runs** (ratios against them may not line up):", ""]
+        out += [f"- {line}" for line in changed]
     out += ["", f"Bold: moved by more than {threshold:.0%} (time, memory) or 0.1 points (size).", "",
             "| scenario | cell | tool | old s | new s | change | old MiB | new MiB | old bytes | new bytes | ok |",
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|"]

@@ -82,7 +82,8 @@ def run(ctx, data_root: Path, manifest: Path) -> dict:
         for round_ in range(scale["dm_rounds"]):
             shift = (n + round_) % len(names)
             for name in names[shift:] + names[:shift]:
-                m = measure(cmds[name], cwd=ctx.scratch, log=log, timeout=ctx.dm_timeout)
+                cmd = ctx.pinning.wrap(cmds[name], None)[0] if getattr(ctx, "pinning", None) else cmds[name]
+                m = measure(cmd, cwd=ctx.scratch, log=log, timeout=ctx.dm_timeout)
                 seen[name].append((m, log_tail(log, 300) if m.exit != 0 else ""))
         best = {}
         for name, got in seen.items():

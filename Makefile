@@ -1,6 +1,6 @@
 
 .PHONY: fetch-rarfast release-bench release-bench-tiny
-.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-all sweep-large report copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
+.PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-edge seed-all sweep-large report copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -44,7 +44,12 @@ seed-corpora:
 seed-corpora-large:
 	./scripts/seed-corpora-large.sh
 
-seed-all: seed-corpora seed-corpora-large
+# Seeded synthetic classes for the shapes rars handles specially (PCM, RGB,
+# records, long repeats, random); identical bytes on every machine.
+seed-edge: install
+	$(RARS_BENCH) seed-edge
+
+seed-all: seed-corpora seed-corpora-large seed-edge
 
 copy-refbins:
 	./scripts/copy-refbins.sh
