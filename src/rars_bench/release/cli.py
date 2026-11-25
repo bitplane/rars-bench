@@ -70,7 +70,9 @@ def add_parsers(sub) -> None:
         return local if local.is_file() else rar_repo / "_refs/rarbins" / name
 
     r = sub.add_parser("release", help="the release bench: speed, memory, size and correctness against RAR")
-    r.add_argument("--rars-bin", type=Path, required=True, help="the build under test; pin it")
+    r.add_argument("--rars-bin", type=Path, default=None, help="the build under test; pin it")
+    from ..build import add_args as add_build_args
+    add_build_args(r)
     r.add_argument("--rars-commit", default=None, help="override the commit read from the binary's checkout")
     r.add_argument("--rar-bin", type=Path, default=ref("rar712-linux-x64"), help="native rar 7.12")
     r.add_argument("--rar393-bin", type=Path, default=ref("rar393-linux-x64"), help="native rar 3.93")
@@ -139,7 +141,8 @@ def describe_tools(args, tools: Tools) -> dict:
     """rars, every registered reference (see `registry.py`), and rarfast, which is timed but no reference."""
     from .. import registry
     rars = {"path": str(tools.rars), "sha256": sha256_file(tools.rars),
-            "version": banner([str(tools.rars), "--version"]), **git_commit(tools.rars)}
+            "version": banner([str(tools.rars), "--version"]),
+            **(getattr(args, "rars_build", None) or git_commit(tools.rars))}
     if args.rars_commit:
         rars.update(commit=args.rars_commit, subject="(given with --rars-commit)", dirty=False)
     out = {"rars": rars, **registry.describe(args)}
@@ -152,9 +155,11 @@ def describe_tools(args, tools: Tools) -> dict:
 
 
 def run(args: argparse.Namespace) -> int:
-    rars = _optional(args.rars_bin)
+    from ..build import resolve_rars
+    found = resolve_rars(args)
+    rars = _optional(found)
     if rars is None:
-        print(f"error: no rars binary at {args.rars_bin}", file=sys.stderr)
+        print(f"error: no rars binary at {found or args.rars_bin}; pass --rars-bin or --rars-ref", file=sys.stderr)
         return 2
     scale = SCALES[args.scale]
     rar = _optional(args.rar_bin)

@@ -24,3 +24,7 @@ _refs/*
 
 # release bench inputs and scratch (rars-bench release)
 .release/
+
+# --rars-ref clones and builds (rars-bench build.py)
+.rars-builds/
+.quick/

@@ -300,9 +300,11 @@ def run_cells(args: argparse.Namespace, rars: Path, unrar: Path | None, sets: di
 # --- the command ---------------------------------------------------------------------------------
 
 def add_parsers(sub) -> None:
+    from .build import add_args as add_build_args
     from .release.cli import add_history_args
     q = sub.add_parser("quick", help="the deterministic tier: sizes, unrar t, level ladder and thread identity")
     q.add_argument("--rars-bin", type=Path, default=None, help="the build under test")
+    add_build_args(q)
     q.add_argument("--corpora-root", type=Path, default=Path("corpora"))
     q.add_argument("--formats", default=None, help=f"comma list (default: {','.join(FORMATS)})")
     q.add_argument("--classes", default=None, help="comma list of corpus classes (default: every one present)")
@@ -324,20 +326,20 @@ def add_parsers(sub) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    from .harness import _resolve_rars_bin
+    from .build import resolve_rars
     from .release.cli import default_label
     from .release.measure import banner, git_commit, sha256_file
-    rars = _resolve_rars_bin(args.rars_bin)
+    rars = resolve_rars(args)
     if rars is None:
-        print("error: no rars binary; pass --rars-bin", file=sys.stderr)
+        print("error: no rars binary; pass --rars-bin or --rars-ref", file=sys.stderr)
         return 2
     unrar = args.unrar_bin if args.unrar_bin.is_file() else None
     started = time.time()
     prof = _machine.profile(args.work_dir)
     sets = {k: _machine.parse_cpu_list(v) for k, v in prof["cpu_sets"].items()}
     load_start = _machine.load_snapshot()
-    rars_info = {"version": banner([str(rars), "--version"]), "sha256": sha256_file(rars), **git_commit(rars),
-                 **getattr(args, "rars_build", {})}
+    rars_info = {"version": banner([str(rars), "--version"]), "sha256": sha256_file(rars),
+                 **(args.rars_build or git_commit(rars))}
     print(f"quick tier: {rars_info['version']} ({rars}), machine {prof['id']}", flush=True)
     cells, info = run_cells(args, rars, unrar, sets)
     flags = all_flags(cells)
