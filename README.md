@@ -186,6 +186,16 @@ tool whose version or hash changed between two results is flagged.
 `rars-bench release` writes one (`-timed.json`) beside its usual output.
 `rars-bench history-import` files an older release-bench JSON into the store.
 
+```sh
+rars-bench history --tier quick --changed-only > history.md
+```
+
+renders cells against versions for one machine (this one, or `--machine`):
+packed bytes and size ratio, time and peak-RSS ratios, pass/fail. Values
+that moved since the previous version are bold: sizes on any change, ratios
+past `--threshold` (5%). `--other-machines` fills versions this machine has
+no record for from other machines, marked ratio-only.
+
 Anything else in `results/` (`release-*.json`, `*.db`, run directories)
 predates this layout, stays local and is ignored by git.
 

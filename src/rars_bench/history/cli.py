@@ -1,4 +1,4 @@
-"""`rars-bench history-import`: bring a release-bench result from before the history store into it."""
+"""`rars-bench history` (the report) and `rars-bench history-import` (an older release result into the store)."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +19,37 @@ def add_parsers(sub) -> None:
     i.add_argument("--commit-date", default=None, help="the rars commit's date, for ordering the history")
     i.add_argument("--history-root", type=Path, default=Path("results"))
     i.add_argument("--workdir", type=Path, default=Path("."), help="where the run wrote its scratch output")
+
+
+def add_report_parser(sub) -> None:
+    h = sub.add_parser("history", help="markdown table of cells against versions for one machine")
+    h.add_argument("--history-root", type=Path, default=Path("results"))
+    h.add_argument("--machine", default=None, help="machine id (default: this machine if it has records)")
+    h.add_argument("--tier", default="all", help="quick, timed, or all (default)")
+    h.add_argument("--other-machines", action="store_true",
+                   help="fill versions this machine lacks from other machines, ratio-only")
+    h.add_argument("--changed-only", action="store_true", help="only rows with something bold")
+    h.add_argument("--threshold", type=float, default=0.05, help="ratio change that counts as moved")
+    h.add_argument("--out", type=Path, default=None)
+
+
+def run_report(args: argparse.Namespace) -> int:
+    from . import report
+    records = store.load_all(args.history_root)
+    if not records:
+        print(f"no history records under {args.history_root}")
+        return 1
+    here = _machine.machine_id(_machine.cpu_model())
+    machine = args.machine or report.default_machine(records, here)
+    tiers = sorted({r["tier"] for r in records}) if args.tier == "all" else [args.tier]
+    text = "\n".join(report.render(records, machine=machine, tier=t, others=args.other_machines,
+                                    threshold=args.threshold, changed_only=args.changed_only) for t in tiers)
+    if args.out:
+        args.out.write_text(text)
+        print(f"wrote {args.out}")
+    else:
+        print(text, end="")
+    return 0
 
 
 def run_import(args: argparse.Namespace) -> int:
