@@ -184,6 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     from .history import cli as _history
 
     _history.add_parsers(sub)
+    from . import quick as _quick
+
+    _quick.add_parsers(sub)
 
     args = p.parse_args(argv)
 
@@ -191,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         return _release.run(args)
     if args.cmd == "release-compare":
         return _release.run_compare(args)
+    if args.cmd == "quick":
+        return _quick.run(args)
     if args.cmd == "history-import":
         return _history.run_import(args)
 
