@@ -76,7 +76,7 @@ def run(ctx, args: argparse.Namespace) -> dict:
         classes = _resolve_corpus_classes(args.sweep_classes.split(",") if args.sweep_classes else [selector],
                                           args.corpora_root)
         if selector == "small" and args.sweep_classes:
-            classes = [c for c in classes if not c.startswith("large-")]
+            classes = [c for c in classes if not c.startswith(("large-", "edge-"))]
         oracle, err = (None, "no reference encoder") if fmt == "rar15" else _build_oracle(fmt, oracle_args)
         drivers = [rars] + ([oracle] if oracle else [])
         db = out_dir / f"{fmt}-{vset}.db"

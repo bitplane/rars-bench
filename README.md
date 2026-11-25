@@ -86,7 +86,15 @@ show (+11% to +30%).
 | `large-incompressible` | already-compressed `.zst` / `.xz`                            |
 | `large-compressible`   | long runs and a repeating phrase                             |
 
-Both tiers are throwaway and gitignored. Everything is seeded from local files
+**Edge classes** (`make seed-edge`, selector `edge`). One seeded synthetic
+file each, at most 4 MiB, for the shapes rars handles specially: `edge-pcm8-mono`,
+`edge-pcm8-stereo`, `edge-pcm16-mono`, `edge-pcm16-stereo` (tones plus noise),
+`edge-rgb24` (noisy ramps), `edge-grey` (noisy gradient), `edge-records` (a
+16-byte struct table), `edge-repeats` (an 8 KiB period with zero runs) and
+`edge-random`. Built from integers only, so the bytes match on every machine.
+`small` leaves them out, so the DOS references never see them; `all` has them.
+
+All three are throwaway and gitignored. Everything is seeded from local files
 or generated deterministically, so reseeding produces identical bytes and the
 oracle encode cache stays valid.
 
