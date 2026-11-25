@@ -65,7 +65,7 @@ def ratio(num: float | None, den: float | None) -> float | None:
 
 # --- from a release-bench result -----------------------------------------------------------------
 
-#: The release bench's names for its references, as the history stores them.
+#: Names the release bench used for its references before the registry, as the registry has them.
 RELEASE_TOOL_NAMES = {f"sweep-{fmt}": f"ref-{fmt}" for fmt in
                       ("rar14", "rar20", "rar29", "rar30", "rar40", "rar50", "rar70")}
 

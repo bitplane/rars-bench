@@ -136,32 +136,18 @@ def _optional(path: Path | None) -> Path | None:
 
 
 def describe_tools(args, tools: Tools) -> dict:
-    out = {}
+    """rars, every registered reference (see `registry.py`), and rarfast, which is timed but no reference."""
+    from .. import registry
     rars = {"path": str(tools.rars), "sha256": sha256_file(tools.rars),
             "version": banner([str(tools.rars), "--version"]), **git_commit(tools.rars)}
     if args.rars_commit:
         rars.update(commit=args.rars_commit, subject="(given with --rars-commit)", dirty=False)
-    out["rars"] = rars
-    for name, cmd in (("rar", [str(tools.rar)] if tools.rar else None),
-                      ("rar393", [str(tools.rar393)] if tools.rar393 else None),
-                      ("unrar", [str(tools.unrar)] if tools.unrar else None),
-                      ("rarfast", [str(tools.rarfast), "--version"] if tools.rarfast else None)):
-        if cmd is None:
-            out[name] = {"version": "not found"}
-            continue
-        path = Path(cmd[0])
-        out[name] = {"path": str(path), "sha256": sha256_file(path), "version": banner(cmd)}
-    # The sweep's references, which only ever give sizes and verdicts.
-    for fmt, cfg in __import__("rars_bench.harness", fromlist=["_WINE_ORACLES"])._WINE_ORACLES.items():
-        exe = args.wineprefix_root / cfg.prefix_subdir / cfg.rar_relpath
-        out[f"sweep-{fmt}"] = {"version": f"WinRAR {cfg.version} (wine; sizes only)", "path": str(exe),
-                               "sha256": sha256_file(exe) if exe.is_file() else "missing"}
-    for fmt, exe, label in (("rar14", args.rar1402_bin, "RAR 1.402"), ("rar20", args.rar250_bin, "RAR 2.50")):
-        out[f"sweep-{fmt}"] = {"version": f"{label} (DOSBox-X; sizes only)", "path": str(exe),
-                               "sha256": sha256_file(exe) if exe.is_file() else "missing"}
-    for name, cmd in (("wine", ["wine", "--version"]), ("dosbox-x", ["dosbox-x", "-version"])):
-        if shutil.which(cmd[0]):
-            out[name] = {"version": banner(cmd, r".")}
+    out = {"rars": rars, **registry.describe(args)}
+    if tools.rarfast:
+        out["rarfast"] = {"path": str(tools.rarfast), "sha256": sha256_file(tools.rarfast),
+                          "version": banner([str(tools.rarfast), "--version"]), "runs": "native"}
+    else:
+        out["rarfast"] = {"version": "not found"}
     return out
 
 

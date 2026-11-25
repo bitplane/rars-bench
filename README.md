@@ -155,6 +155,11 @@ reference tool from the same run. Cells are keyed by thread label (`t1`, `t4`,
 across machines, raw times and memory only on the same one. The machine id is
 a CPU-model slug plus a hash of `/etc/machine-id`.
 
+References are entries in `src/rars_bench/registry.py`: a name, how to find the
+binary, how to read its version, and the cells it is the reference for. A
+cell's ratios line up across results only against the same tool name, and a
+tool whose version or hash changed between two results is flagged.
+
 `rars-bench release` writes one (`-timed.json`) beside its usual output.
 `rars-bench history-import` files an older release-bench JSON into the store.
 
