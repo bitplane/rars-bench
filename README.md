@@ -144,6 +144,23 @@ and reused. `--scale tiny` runs it all in a few minutes to check the runner.
 Output is `results/release-<date>-<commit>-<scale>.{json,md}`, with every
 format-sweep cell in `format-cells.tsv` beside them, worst gap first.
 
+## History store
+
+`results/<rars version or tag>/<machine-id>-<tier>.json`, committed. Each file
+holds the machine's profile (CPU, L3 domains, the CPU set each thread count ran
+on, kernel, filesystem, load at start and end), every tool's version and
+sha256, and one entry per cell with its raw metrics and its ratios to the
+reference tool from the same run. Cells are keyed by thread label (`t1`, `t4`,
+`tmax`), not thread count, so they line up across machines; ratios compare
+across machines, raw times and memory only on the same one. The machine id is
+a CPU-model slug plus a hash of `/etc/machine-id`.
+
+`rars-bench release` writes one (`-timed.json`) beside its usual output.
+`rars-bench history-import` files an older release-bench JSON into the store.
+
+Anything else in `results/` (`release-*.json`, `*.db`, run directories)
+predates this layout, stays local and is ignored by git.
+
 ## Result schema
 
 See `src/rars_bench/schema.py`. One row per (encoder × variant × corpus_path)

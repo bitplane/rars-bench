@@ -13,6 +13,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..history import machine as _machine
+from ..history import store as _store
 from . import discmaster, formats, report
 from .inputs import Inputs
 from .measure import banner, git_commit, sha256_file
@@ -96,12 +98,37 @@ def add_parsers(sub) -> None:
     r.add_argument("--wineprefix-root", type=Path, default=Path("_refs/wineprefixes"))
     r.add_argument("--cache-root", type=Path, default=Path("_refs/cache"), help="oracle encode cache")
     r.add_argument("--no-oracle-cache", action="store_true")
+    add_history_args(r)
 
     c = sub.add_parser("release-compare", help="markdown diff of two release-bench JSON files")
     c.add_argument("old", type=Path)
     c.add_argument("new", type=Path)
     c.add_argument("--out", type=Path, default=None)
     c.add_argument("--threshold", type=float, default=0.05)
+
+
+def add_history_args(p) -> None:
+    p.add_argument("--history-root", type=Path, default=Path("results"),
+                   help="history store: writes <root>/<label>/<machine-id>-<tier>.json")
+    p.add_argument("--label", default=None,
+                   help="version directory in the history store (default: the tag the build sits on, "
+                        "else its commit's first 8 hex digits)")
+    p.add_argument("--note", default=None, help="free text kept in the history record, e.g. what the build is")
+    p.add_argument("--no-history", action="store_true", help="write no history record")
+
+
+def default_label(rars: dict) -> str:
+    """The tag the binary's checkout sits on, else its commit, else its hash."""
+    if rars.get("tag"):
+        return rars["tag"]
+    checkout = rars.get("checkout")
+    if checkout and not rars.get("dirty"):
+        import subprocess
+        done = subprocess.run(["git", "-C", checkout, "describe", "--tags", "--exact-match", "HEAD"],
+                              capture_output=True, text=True)
+        if done.returncode == 0 and done.stdout.strip():
+            return done.stdout.strip()
+    return (rars.get("commit") or rars.get("sha256") or "unknown")[:8]
 
 
 def _optional(path: Path | None) -> Path | None:
@@ -159,6 +186,8 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     started = time.time()
+    machine = _machine.profile(args.scratch)
+    load_start = _machine.load_snapshot()
     meta = {"date": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "scale": args.scale,
             "scale_params": {k: v for k, v in scale.items() if not callable(v)},
             "rounds": args.rounds or scale["rounds"], "threads_available": tools.many,
@@ -236,6 +265,11 @@ def run(args: argparse.Namespace) -> int:
     json_path.write_text(json.dumps(result, indent=1, default=str))
     report.write(md_path, report.render(result))
     print(f"wrote {json_path} and {md_path} in {meta['elapsed_s'] / 60:.1f} min")
+    if not args.no_history:
+        record = _store.from_release(json.loads(json.dumps(result, default=str)),
+                                     label=args.label or default_label(meta["tools"]["rars"]), machine=machine,
+                                     load={"start": load_start, "end": _machine.load_snapshot()}, note=args.note)
+        print(f"history: {_store.write(args.history_root, record)}")
     return 1 if any("error" in s for s in result["scenarios"]) else 0
 
 

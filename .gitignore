@@ -13,6 +13,11 @@ corpora
 !corpora/.gitkeep
 results/*
 !results/.gitkeep
+# ...except the history store: results/<version>/<machine-id>-<tier>.json
+!results/*/
+results/*/*
+!results/*/*-quick.json
+!results/*/*-timed.json
 # reference RAR binaries — copied locally, never pushed
 _refs/*
 !_refs/**/.gitkeep

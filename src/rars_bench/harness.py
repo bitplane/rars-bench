@@ -181,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
     from .release import cli as _release
 
     _release.add_parsers(sub)
+    from .history import cli as _history
+
+    _history.add_parsers(sub)
 
     args = p.parse_args(argv)
 
@@ -188,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         return _release.run(args)
     if args.cmd == "release-compare":
         return _release.run_compare(args)
+    if args.cmd == "history-import":
+        return _history.run_import(args)
 
     if args.cmd == "sweep":
         return _cmd_sweep(args)
