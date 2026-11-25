@@ -110,7 +110,7 @@ def host_lines(meta: dict) -> list[str]:
     out = [f"Machine `{machine['id']}`, {machine.get('cpu_model')}, {machine.get('logical_cpus')} logical CPUs; "
            + ", ".join(f"{k} on CPUs {v}" for k, v in sets.items()) + ".", ""]
     for when in ("start", "end"):
-        warning = load_warning(load.get(when), machine.get("logical_cpus") or 1)
+        warning = load_warning(load.get(when), machine.get("logical_cpus") or 1, use_loadavg=when == "start")
         if warning:
             out += [f"**Busy machine at the {when}:** {warning}. Timings may be inflated.", ""]
     return out

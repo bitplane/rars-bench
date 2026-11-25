@@ -216,13 +216,18 @@ def load_snapshot(root: Path = Path("/"), sample_s: float = 1.0) -> dict:
             "others_cpu_pct": sum(b["cpu_pct"] for b in busy)}
 
 
-def load_warning(snapshot: dict | None, logical_cpus: int) -> str | None:
-    """A sentence for the report when the machine was busy, or None."""
+def load_warning(snapshot: dict | None, logical_cpus: int, use_loadavg: bool = True) -> str | None:
+    """A sentence for the report when the machine was busy, or None.
+
+    The load average counts the bench's own work, so it means something at the
+    start of a run and not at the end; pass `use_loadavg=False` there and only
+    other users' processes count.
+    """
     if not snapshot:
         return None
     one = snapshot["loadavg"][0]
     others = snapshot.get("others_cpu_pct", 0)
-    if one > BUSY_SHARE * logical_cpus or others > BUSY_SHARE * logical_cpus * 100:
+    if (use_loadavg and one > BUSY_SHARE * logical_cpus) or others > BUSY_SHARE * logical_cpus * 100:
         return (f"load average {one:.1f} on {logical_cpus} CPUs, other users' processes "
                 f"using {others / 100:.1f} CPUs")
     return None

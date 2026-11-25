@@ -116,8 +116,9 @@ def render(records: list[dict], *, machine: str, tier: str, others: bool = False
         notes = [f"tool {c}" for c in changes]
         load = record.get("load") or {}
         cpus = record["machine"].get("logical_cpus") or 1
-        notes += [f"busy at {w}: {msg}" for w in ("start", "end")
-                  if (msg := load_warning(load.get(w), cpus))]
+        if tier != "quick":  # the quick tier times nothing, so load cannot skew it
+            notes += [f"busy at {w}: {msg}" for w in ("start", "end")
+                      if (msg := load_warning(load.get(w), cpus, use_loadavg=w == "start"))]
         if record["rars"].get("note"):
             notes.append(record["rars"]["note"])
         checks = record.get("checks") or {}

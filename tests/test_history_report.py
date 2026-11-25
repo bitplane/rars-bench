@@ -68,7 +68,10 @@ def test_changed_only_and_load_note() -> None:
             record("v2", "2026-11-24", {S: size(999), "size/rar50/plain/m3/logs": size(5)}, load=busy)]
     text = report.render(recs, machine="m-aaaaaa", tier="quick", changed_only=True)
     assert "| plain/m3/text |" in text and "| plain/m3/logs |" not in text
-    assert "busy at start: load average 30.0" in text
+    assert "busy at" not in text
+    for r in recs:
+        r["tier"] = "timed"
+    assert "busy at start: load average 30.0" in report.render(recs, machine="m-aaaaaa", tier="timed")
 
 
 def test_default_machine_prefers_here() -> None:

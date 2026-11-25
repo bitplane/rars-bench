@@ -174,7 +174,7 @@ def test_release_report_warns_when_busy() -> None:
     result["meta"]["machine"] = {"id": "m-abc123", "cpu_model": "x", "logical_cpus": 32,
                                  "cpu_sets": {"t1": "1", "t4": "1-4", "tmax": "1-31"}}
     result["meta"]["load"] = {"start": {"loadavg": [20.0, 1, 1], "others_cpu_pct": 0},
-                              "end": {"loadavg": [1.0, 1, 1], "others_cpu_pct": 0}}
+                              "end": {"loadavg": [40.0, 1, 1], "others_cpu_pct": 0}}
     text = report.render(result)
     assert "t4 on CPUs 1-4" in text
     assert "Busy machine at the start" in text and "Busy machine at the end" not in text
