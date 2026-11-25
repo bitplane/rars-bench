@@ -112,7 +112,8 @@ def cpu_sets(allowed: list[int], domains: list[dict], counts: dict[str, int],
     """The CPUs each thread label runs on. Never CPU 0.
 
     A count that fits in one L3 domain gets CPUs from the first domain it fits
-    in (biggest cache first), one per physical core before any SMT sibling. A
+    in (biggest cache first), one per physical core before any SMT sibling,
+    and the sibling of CPU 0 last, since CPU 0 takes the machine's interrupts. A
     count that fits in none takes every allowed CPU but CPU 0.
     """
     cores = cores or {}
@@ -124,12 +125,16 @@ def cpu_sets(allowed: list[int], domains: list[dict], counts: dict[str, int],
             members = [c for c in parse_cpu_list(dom["cpus"]) if c in usable]
             if len(members) < count:
                 continue
-            firsts, seconds, used = [], [], set()
+            # One CPU per core first, then SMT siblings, and CPU 0's sibling last of all.
+            firsts, seconds, lasts, used = [], [], [], set()
             for c in members:
                 core = cores.get(c, c)
-                (seconds if core in used else firsts).append(c)
+                if core == cores.get(0, 0):
+                    lasts.append(c)
+                else:
+                    (seconds if core in used else firsts).append(c)
                 used.add(core)
-            chosen = sorted((firsts + seconds)[:count])
+            chosen = sorted((firsts + seconds + lasts)[:count])
             break
         out[label] = chosen if chosen is not None else usable[:count]
     return out
@@ -244,3 +249,42 @@ def profile(workdir: Path, root: Path = Path("/"), allowed: list[int] | None = N
         "python": platform.python_version(),
         "workdir_fs": mount_fs(workdir.resolve(), mountinfo),
     }
+
+
+class Pinning:
+    """The CPU set for each thread count a timed run asks for, chosen once and reused."""
+
+    def __init__(self, allowed: list[int], many: int, root: Path = Path("/")):
+        self.allowed = sorted(allowed)
+        self.many = many
+        self.domains = l3_domains(root)
+        self.cores = {c: core_of(c, root) for c in self.allowed}
+        self._sets: dict[int, list[int]] = {}
+
+    def cpus(self, threads: int | None) -> list[int]:
+        """`None` is a tool's own default threading: it gets the tmax set."""
+        n = self.many if threads is None else threads
+        if n not in self._sets:
+            self._sets[n] = cpu_sets(self.allowed, self.domains, {"n": n}, self.cores)["n"]
+        return self._sets[n]
+
+    def labels(self) -> dict[str, str]:
+        return {label: format_cpu_list(self.cpus(n)) for label, n in
+                (("t1", 1), ("t4", min(4, self.many)), ("tmax", self.many))}
+
+    def wrap(self, cmd: list[str], threads: int | None) -> tuple[list[str], str | None]:
+        """cmd under `taskset -c <set>`, and the set; cmd unchanged where taskset is missing."""
+        import shutil
+        if not shutil.which("taskset"):
+            return cmd, None
+        cpus = format_cpu_list(self.cpus(threads))
+        return ["taskset", "-c", cpus, *cmd], cpus
+
+
+def avoid_cpu0() -> list[int]:
+    """Move this process (and so everything it starts) off CPU 0; returns the CPUs left to it."""
+    allowed = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else list(range(os.cpu_count() or 1))
+    usable = [c for c in allowed if c != 0] or allowed
+    if usable != allowed and hasattr(os, "sched_setaffinity"):
+        os.sched_setaffinity(0, usable)
+    return usable

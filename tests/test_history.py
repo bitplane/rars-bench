@@ -143,3 +143,38 @@ def test_write_and_load_skip_old_files(tmp_path: Path) -> None:
     (tmp_path / "old.json").write_text("{}")
     loaded = store.load_all(tmp_path)
     assert [r["rars"]["label"] for r in loaded] == ["v0.13.1"]
+
+
+def test_pinning_wraps_with_taskset(tmp_path: Path) -> None:
+    import shutil
+    fake_sysfs(tmp_path, {"0-7,16-23": "98304K", "8-15,24-31": "32768K"})
+    pin = machine.Pinning(list(range(1, 32)), 31, tmp_path)
+    assert pin.cpus(1) == [1] and pin.cpus(4) == [1, 2, 3, 4] and pin.cpus(None) == list(range(1, 32))
+    # Eight threads fit the big-cache domain: its seven other cores, then a sibling.
+    assert pin.cpus(8) == [1, 2, 3, 4, 5, 6, 7, 17]
+    assert pin.labels() == {"t1": "1", "t4": "1-4", "tmax": "1-31"}
+    cmd, cpus = pin.wrap(["rars", "x"], 4)
+    if shutil.which("taskset"):
+        assert cmd == ["taskset", "-c", "1-4", "rars", "x"] and cpus == "1-4"
+
+
+def test_avoid_cpu0_keeps_other_cpus() -> None:
+    import os
+    before = os.sched_getaffinity(0)
+    try:
+        usable = machine.avoid_cpu0()
+        assert usable and (0 not in usable or before == {0})
+    finally:
+        os.sched_setaffinity(0, before)
+
+
+def test_release_report_warns_when_busy() -> None:
+    from rars_bench.release import report
+    result = _result("tiny", 1.0, 1000)
+    result["meta"]["machine"] = {"id": "m-abc123", "cpu_model": "x", "logical_cpus": 32,
+                                 "cpu_sets": {"t1": "1", "t4": "1-4", "tmax": "1-31"}}
+    result["meta"]["load"] = {"start": {"loadavg": [20.0, 1, 1], "others_cpu_pct": 0},
+                              "end": {"loadavg": [1.0, 1, 1], "others_cpu_pct": 0}}
+    text = report.render(result)
+    assert "t4 on CPUs 1-4" in text
+    assert "Busy machine at the start" in text and "Busy machine at the end" not in text

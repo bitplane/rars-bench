@@ -335,7 +335,7 @@ def run(args: argparse.Namespace) -> int:
         return 2
     unrar = args.unrar_bin if args.unrar_bin.is_file() else None
     started = time.time()
-    prof = _machine.profile(args.work_dir)
+    prof = _machine.profile(args.work_dir, allowed=_machine.avoid_cpu0())
     sets = {k: _machine.parse_cpu_list(v) for k, v in prof["cpu_sets"].items()}
     load_start = _machine.load_snapshot()
     rars_info = {"version": banner([str(rars), "--version"]), "sha256": sha256_file(rars),

@@ -170,7 +170,7 @@ def rar5_big(ctx) -> tuple[dict, list[Group]]:
     expected = ctx.inputs.manifest_of(big["name"])
     archive = first_volume(ref)
     groups = []
-    for threads in ctx.scale["read_threads"]:
+    for threads in ctx.scale["read_threads"](ctx.tools.many):
         groups.append(Group(f"test t{threads}", reader_ops(ctx.tools, "test", archive, ctx.scratch, threads),
                             {"threads": threads}))
         groups.append(Group(f"extract t{threads}",
@@ -268,11 +268,12 @@ def run_group(group: Group, ctx) -> list[dict]:
                 shutil.rmtree(op.out, ignore_errors=True)
                 op.out.mkdir(parents=True)
             log = logs / f"{i}.log"
-            m = measure(op.cmd, cwd=op.cwd, log=log, timeout=ctx.timeout)
+            cmd, cpus = ctx.pinning.wrap(op.cmd, op.threads) if ctx.pinning else (op.cmd, None)
+            m = measure(cmd, cwd=op.cwd, log=log, timeout=ctx.timeout)
             runs[i].append(m)
             last = round_ == rounds - 1
             if m.exit != 0 or last:
-                results[i] = _finish(op, runs[i], log, ctx)
+                results[i] = {**_finish(op, runs[i], log, ctx), "cpus": cpus}
                 done.add(i)
     return [results[i] for i in range(len(group.ops))]
 

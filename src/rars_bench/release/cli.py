@@ -28,7 +28,7 @@ SCALES = {
     # 64 MiB put a quarter of an hour into that one row.
     "full": {
         "volume_bytes": 2 * GIB, "volume_size": "100m", "big_bytes": GIB, "small_files": 20000,
-        "class_bytes": 32 * MIB, "random_bytes": GIB, "read_threads": [1, 4, 16],
+        "class_bytes": 32 * MIB, "random_bytes": GIB, "read_threads": lambda many: [1, 4, many],
         "create_levels": [1, 3, 5], "create_threads": lambda many: [1, many],
         "random_cells": lambda many: [(many, [1, 3, 5]), (1, [3])],
         "rounds": 3, "dm_count": 3000, "dm_max_bytes": 16 * MIB, "dm_seed": 368, "dm_rounds": 2,
@@ -36,7 +36,7 @@ SCALES = {
     # Seconds per scenario: proves the runner end to end, measures nothing.
     "tiny": {
         "volume_bytes": 8 * MIB, "volume_size": "1m", "big_bytes": 8 * MIB, "small_files": 200,
-        "class_bytes": 2 * MIB, "random_bytes": 8 * MIB, "read_threads": [1, 2],
+        "class_bytes": 2 * MIB, "random_bytes": 8 * MIB, "read_threads": lambda many: [1, min(4, many)],
         "create_levels": [1, 5], "create_threads": lambda many: [1, many],
         "random_cells": lambda many: [(many, [3]), (1, [3])],
         "rounds": 2, "dm_count": 20, "dm_max_bytes": MIB, "dm_seed": 368, "dm_rounds": 1,
@@ -59,6 +59,7 @@ class Ctx:
     scratch_root: Path
     scratch: Path = field(default=None)
     log: object = print
+    pinning: object = None
 
 
 def add_parsers(sub) -> None:
@@ -162,10 +163,13 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: no rars binary at {found or args.rars_bin}; pass --rars-bin or --rars-ref", file=sys.stderr)
         return 2
     scale = SCALES[args.scale]
+    usable = _machine.avoid_cpu0()
+    many = args.threads or len(usable)
+    pinning = _machine.Pinning(usable, many)
     rar = _optional(args.rar_bin)
     tools = Tools(rars=rars, rar=rar, rar_sha=sha256_file(rar) if rar else "", rar393=_optional(args.rar393_bin),
                   unrar=_optional(args.unrar_bin), rarfast=_optional(args.rarfast_bin),
-                  many=args.threads or len(os.sched_getaffinity(0)))
+                  many=many)
     chosen = args.only.split(",") if args.only else list(ALL)
     chosen = [s for s in chosen if s not in set(filter(None, args.skip.split(",")))]
     unknown = set(chosen) - set(ALL)
@@ -177,13 +181,16 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     started = time.time()
-    machine = _machine.profile(args.scratch)
+    machine = _machine.profile(args.scratch, allowed=usable)
+    machine["cpu_sets"] = pinning.labels()
+    machine["pinned"] = True
     load_start = _machine.load_snapshot()
     meta = {"date": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "scale": args.scale,
             "scale_params": {k: v for k, v in scale.items() if not callable(v)},
             "rounds": args.rounds or scale["rounds"], "threads_available": tools.many,
             "host": {"kernel": platform.release(), "python": platform.python_version(),
                      "cpus": os.cpu_count()},
+            "machine": machine, "load": {"start": load_start},
             "tools": describe_tools(args, tools), "scenarios_run": chosen}
     commit = (meta["tools"]["rars"].get("commit") or meta["tools"]["rars"]["sha256"])[:8]
     stem = f"release-{meta['date'][:10]}-{commit}-{args.scale}"
@@ -193,7 +200,7 @@ def run(args: argparse.Namespace) -> int:
         run_dir.mkdir(exist_ok=True)
     ctx = Ctx(tools=tools, inputs=Inputs(args.cache.resolve(), scale), scale=scale, rounds=meta["rounds"],
               timeout=args.timeout, dm_timeout=min(args.timeout, 300.0), run_dir=run_dir,
-              scratch_root=args.scratch.resolve())
+              scratch_root=args.scratch.resolve(), pinning=pinning)
     result = {"meta": meta, "scenarios": [], "cells_tsv": str(run_dir / "format-cells.tsv")}
     json_path, md_path = args.out_dir / f"{stem}.json", args.out_dir / f"{stem}.md"
 
@@ -250,6 +257,7 @@ def run(args: argparse.Namespace) -> int:
             json_path.write_text(json.dumps(result, indent=1, default=str))
 
     meta["elapsed_s"] = time.time() - started
+    meta["load"]["end"] = _machine.load_snapshot()
     if args.prepare:
         print(f"prepared inputs in {args.cache} in {meta['elapsed_s'] / 60:.1f} min")
         return 1 if any("error" in s for s in result["scenarios"]) else 0
@@ -259,7 +267,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_history:
         record = _store.from_release(json.loads(json.dumps(result, default=str)),
                                      label=args.label or default_label(meta["tools"]["rars"]), machine=machine,
-                                     load={"start": load_start, "end": _machine.load_snapshot()}, note=args.note)
+                                     load=meta["load"], note=args.note)
         print(f"history: {_store.write(args.history_root, record)}")
     return 1 if any("error" in s for s in result["scenarios"]) else 0
 
