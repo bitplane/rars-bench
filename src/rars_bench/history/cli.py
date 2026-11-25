@@ -26,6 +26,7 @@ def run_import(args: argparse.Namespace) -> int:
     prof = _machine.profile(args.workdir)
     # The run predates pinning: record what it could use, not a set it never ran on.
     prof["cpu_sets"] = None
+    prof["allowed_cpus"] = None
     prof["pinned"] = False
     extra = {"imported_from": args.result.name}
     if args.commit_date:
