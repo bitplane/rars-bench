@@ -20,6 +20,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .measure import log_tail, measure
+from .scenarios import READERS
 
 SIGS = [(b"RE~^", "rar1.3"), (b"Rar!\x1a\x07\x01\x00", "rar5"), (b"Rar!\x1a\x07\x00", "rar1.5-4")]
 
@@ -61,8 +62,8 @@ def sample(data_root: Path, manifest: Path, count: int, max_bytes: int, seed: in
 
 def commands(tools, archive: Path) -> dict[str, list[str]]:
     cmds = {"rars": [str(tools.rars), "--progress", "never", "test", str(archive)]}
-    for name in ("unrar", "rarfast"):
-        binary = getattr(tools, name)
+    for name in READERS:
+        binary = tools.reader(name)
         if binary is not None:
             cmds[name] = [str(binary), "t", "-idq", "-p-", str(archive)]
     return cmds

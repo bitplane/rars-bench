@@ -84,3 +84,36 @@ def test_render_and_compare() -> None:
     assert "1.00x" in text and "+5.00%" in text
     diff = report.compare(old, new)
     assert "**-50.0%**" in diff and "**1050**" in diff
+
+
+def _tools(tmp_path: Path, **peers) -> "Tools":
+    from rars_bench.release.scenarios import Tools
+    return Tools(rars=tmp_path / "rars", rar=tmp_path / "rar", rar_sha="", rar393=tmp_path / "rar393",
+                 unrar=tmp_path / "unrar", rarfast=None, many=16, **peers)
+
+
+def test_rar_rs_writes_rar5_and_rar4_beside_the_references(tmp_path: Path) -> None:
+    from rars_bench.release.scenarios import creator_ops
+    tools = _tools(tmp_path, rar_rs=tmp_path / "rar-rs")
+    rar5 = {op.tool: op for op in creator_ops(tools, tmp_path, tmp_path, ["a.tar"], level=3, threads=4)}
+    rar4 = {op.tool: op for op in creator_ops(tools, tmp_path, tmp_path, ["a.tar"], level=3, threads=4,
+                                              fmt="rar40", legacy=True)}
+    assert {"-ma5", "-m3", "-mt4"} <= set(rar5["rar-rs"].cmd) and not rar5["rar-rs"].reference
+    assert {"-ma4", "-m3", "-mt4"} <= set(rar4["rar-rs"].cmd) and not rar4["rar-rs"].reference
+    assert rar5["rar"].reference and rar4["rar393"].reference
+
+
+def test_rar_rs_reads_with_its_own_unrar(tmp_path: Path) -> None:
+    from rars_bench.release.scenarios import reader_ops
+    tools = _tools(tmp_path, unrar_rs=tmp_path / "unrar-rs")
+    ops = {op.tool: op for op in reader_ops(tools, "test", tmp_path / "a.rar", tmp_path, 4)}
+    assert ops["rar-rs"].cmd[0] == str(tmp_path / "unrar-rs") and not ops["rar-rs"].reference
+    assert "rar-rs" in tools.readers() and "rarfast" not in tools.readers()
+
+
+def test_no_rar_rs_means_no_rar_rs_ops(tmp_path: Path) -> None:
+    from rars_bench.release.scenarios import creator_ops, reader_ops
+    tools = _tools(tmp_path)
+    ops = creator_ops(tools, tmp_path, tmp_path, ["a.tar"], level=3, threads=4)
+    ops += reader_ops(tools, "test", tmp_path / "a.rar", tmp_path, 4)
+    assert all(op.tool != "rar-rs" for op in ops)

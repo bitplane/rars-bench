@@ -10,7 +10,8 @@ compared file by file (size and CRC32) with the input, a created archive is
 tested by `unrar t`, and a test is its exit status.
 
 Timing compares only native binaries: rars, `rar` 7.12 (RAR 5 writing),
-`rar` 3.93 (RAR 2.9 to 4.x writing), `unrar` 7.20 and rarfast.
+`rar` 3.93 (RAR 2.9 to 4.x writing), `unrar` 7.20, and the peers rarfast
+and rar-rs, which are timed beside them but are never the reference.
 """
 from __future__ import annotations
 
@@ -24,6 +25,10 @@ from .inputs import Inputs, archive_bytes, compare_tree, first_volume
 from .measure import log_tail, measure
 
 
+#: Every reader timed beside rars, in table order. Only `unrar` is a reference.
+READERS = ("unrar", "rarfast", "rar-rs")
+
+
 @dataclass
 class Tools:
     rars: Path
@@ -33,14 +38,20 @@ class Tools:
     unrar: Path | None
     rarfast: Path | None
     many: int
+    rar_rs: Path | None = None      # rar-rs's `rar`: RAR 5 and RAR 4 writing
+    unrar_rs: Path | None = None    # rar-rs's `unrar`: reading
+
+    def reader(self, name: str) -> Path | None:
+        """The binary a reader name runs: `unrar`, `rarfast` or `rar-rs`."""
+        return self.unrar_rs if name == "rar-rs" else getattr(self, name)
 
     def readers(self) -> list[str]:
-        return ["rars"] + [n for n in ("unrar", "rarfast") if getattr(self, n)]
+        return ["rars"] + [n for n in READERS if self.reader(n)]
 
 
 @dataclass
 class Op:
-    tool: str                    # rars, rars-in-place, unrar, rarfast, rar, rar393
+    tool: str                    # rars, rars-in-place, unrar, rarfast, rar-rs, rar, rar393
     kind: str                    # test | extract | create
     cmd: list[str]
     cwd: Path | None = None
@@ -64,7 +75,7 @@ def rars_global(tools: Tools, threads: int | None) -> list[str]:
 
 def reader_ops(tools: Tools, kind: str, archive: Path, scratch: Path, threads: int,
                expected: dict | None = None, in_place: bool = True) -> list[Op]:
-    """rars, unrar and rarfast reading one archive, at one thread count."""
+    """rars, unrar and the peers reading one archive, at one thread count."""
     ops = []
     if kind == "test":
         ops.append(Op("rars", kind, rars_global(tools, threads) + ["test", str(archive)], threads=threads))
@@ -74,8 +85,8 @@ def reader_ops(tools: Tools, kind: str, archive: Path, scratch: Path, threads: i
             out = scratch / f"x-{name}"
             ops.append(Op(name, kind, rars_global(tools, threads) + ["x", *extra, str(archive), str(out)],
                           out=out, expected=expected, threads=threads))
-    for name in ("unrar", "rarfast"):
-        binary = getattr(tools, name)
+    for name in READERS:
+        binary = tools.reader(name)
         if binary is None:
             continue
         switches = ["-idq", "-p-", f"-mt{threads}"]
@@ -107,13 +118,18 @@ def creator_ops(tools: Tools, scratch: Path, cwd: Path, members: list[str], *, l
             ops.append(Op("rar393", "create", [str(tools.rar393), "a", "-idq", f"-m{level}",
                                                str(out / "out.rar"), *members],
                           cwd=cwd, out=out, threads=None, reference=True))
+        if tools.rar_rs is not None:
+            out = scratch / f"c-rar-rs-{tag}"
+            switches = ["-idq", "-ma4", f"-m{level}"] + ([f"-mt{threads}"] if threads else [])
+            ops.append(Op("rar-rs", "create", [str(tools.rar_rs), "a", *switches, str(out / "out.rar"), *members],
+                          cwd=cwd, out=out, threads=threads))
         return ops
-    for name in ("rar", "rarfast"):
-        binary = getattr(tools, name)
+    for name, binary in (("rar", tools.rar), ("rarfast", tools.rarfast), ("rar-rs", tools.rar_rs)):
         if binary is None:
             continue
         out = scratch / f"c-{name}-{tag}"
-        switches = ["-idq", f"-m{level}"] + ([f"-mt{threads}"] if threads else [])
+        switches = ["-idq", f"-m{level}"] + (["-ma5"] if name == "rar-rs" else [])
+        switches += [f"-mt{threads}"] if threads else []
         switches += [f"-v{volume}"] if volume else []
         ops.append(Op(name, "create", [str(binary), "a", *switches, str(out / "out.rar"), *members],
                       cwd=cwd, out=out, threads=threads, reference=(name == "rar")))
@@ -225,6 +241,7 @@ def create_rar4(ctx) -> tuple[dict, list[Group]]:
 
     rar 7.12 can no longer write RAR 4 (`-ma4` is refused), and neither can
     rarfast 0.9.0, so 3.93 is the only native reference for this format.
+    rar-rs writes it with `-ma4` and is timed beside them as a peer.
     """
     classes = ctx.inputs.classes()
     groups = []
