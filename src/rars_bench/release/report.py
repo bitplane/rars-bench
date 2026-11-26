@@ -34,11 +34,12 @@ def headline_rows(result: dict) -> list[dict]:
         for group in sc.get("groups", []):
             ref = _ref(group)
             fast = next((r for r in group["results"] if r["tool"] == "rarfast"), None)
+            rs = next((r for r in group["results"] if r["tool"] == "rar-rs"), None)
             for r in group["results"]:
                 if not r["tool"].startswith("rars"):
                     continue
                 rows.append({"scenario": sc["name"], "group": group["name"], "attrs": group["attrs"],
-                             "rars": r, "ref": ref, "rarfast": fast,
+                             "rars": r, "ref": ref, "rarfast": fast, "rar-rs": rs,
                              "time": r["wall_min_s"] / ref["wall_min_s"] if ref and ref["ok"] else None,
                              "rss": r["rss_max_kib"] / ref["rss_max_kib"] if ref and ref["rss_max_kib"] else None,
                              "size": (r["out_bytes"] / ref["out_bytes"] - 1)
@@ -63,14 +64,16 @@ def render(result: dict) -> str:
             "uses more memory.", ""]
 
     out += ["## Headline: rars against the native reference", "",
-            "| scenario | cell | rars | reference | rars s | ref s | time | rarfast s | rars MiB | ref MiB "
-            "| memory | size | rars ok |", "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+            "| scenario | cell | rars | reference | rars s | ref s | time | rarfast s | rar-rs s | rars MiB "
+            "| ref MiB | memory | size | rars ok |",
+            "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for row in headline_rows(result):
-        r, ref, fast = row["rars"], row["ref"], row["rarfast"]
+        r, ref, fast, rs = row["rars"], row["ref"], row["rarfast"], row["rar-rs"]
         out.append(f"| {row['scenario']} | {row['group']} | {r['tool']} | {ref['tool'] if ref else '-'} "
                    f"| {secs(r['wall_min_s'])} | {secs(ref['wall_min_s']) if ref else '-'} "
                    f"| {times(row['time'])} "
                    f"| {secs(fast['wall_min_s']) if fast and fast['ok'] else ('fail' if fast else '-')} "
+                   f"| {secs(rs['wall_min_s']) if rs and rs['ok'] else ('fail' if rs else '-')} "
                    f"| {mib(r['rss_max_kib'])} | {mib(ref['rss_max_kib']) if ref else '-'} "
                    f"| {times(row['rss'])} | {pct(row['size'])} "
                    f"| {'yes' if r['ok'] else '**NO**'} |")
@@ -140,7 +143,7 @@ def medians(result: dict) -> list[str]:
 
 
 def discmaster_md(dm: dict) -> list[str]:
-    tools = [t for t in ("rars", "unrar", "rarfast") if t in dm["families"]["all"]]
+    tools = [t for t in ("rars", "unrar", "rarfast", "rar-rs") if t in dm["families"]["all"]]
     head = "| family | archives | MB | " + " | ".join(f"{t} pass | {t} s | {t} median ms | {t} peak MiB"
                                                     for t in tools) + " |"
     out = [head, "|---|---:|---:|" + "---:|" * (4 * len(tools))]

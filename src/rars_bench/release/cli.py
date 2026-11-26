@@ -79,6 +79,8 @@ def add_parsers(sub) -> None:
     r.add_argument("--rar393-bin", type=Path, default=ref("rar393-linux-x64"), help="native rar 3.93")
     r.add_argument("--unrar-bin", type=Path, default=Path("/usr/bin/unrar"))
     r.add_argument("--rarfast-bin", type=Path, default=here / "_refs/rarfast/rarfast")
+    r.add_argument("--rar-rs-bin", type=Path, default=here / "_refs/rar-rs/rar", help="rar-rs's rar")
+    r.add_argument("--unrar-rs-bin", type=Path, default=here / "_refs/rar-rs/unrar", help="rar-rs's unrar")
     r.add_argument("--scale", choices=sorted(SCALES), default="full")
     r.add_argument("--rounds", type=int, default=None, help="override the scale's rounds")
     r.add_argument("--only", default=None, help=f"comma list from: {','.join(ALL)}")
@@ -139,7 +141,7 @@ def _optional(path: Path | None) -> Path | None:
 
 
 def describe_tools(args, tools: Tools) -> dict:
-    """rars, every registered reference (see `registry.py`), and rarfast, which is timed but no reference."""
+    """rars, every registered reference (see `registry.py`), and the peers, which are timed but no reference."""
     from .. import registry
     rars = {"path": str(tools.rars), "sha256": sha256_file(tools.rars),
             "version": banner([str(tools.rars), "--version"]),
@@ -147,11 +149,12 @@ def describe_tools(args, tools: Tools) -> dict:
     if args.rars_commit:
         rars.update(commit=args.rars_commit, subject="(given with --rars-commit)", dirty=False)
     out = {"rars": rars, **registry.describe(args)}
-    if tools.rarfast:
-        out["rarfast"] = {"path": str(tools.rarfast), "sha256": sha256_file(tools.rarfast),
-                          "version": banner([str(tools.rarfast), "--version"]), "runs": "native"}
-    else:
-        out["rarfast"] = {"version": "not found"}
+    for name, binary in (("rarfast", tools.rarfast), ("rar-rs", tools.rar_rs), ("unrar-rs", tools.unrar_rs)):
+        if binary:
+            out[name] = {"path": str(binary), "sha256": sha256_file(binary),
+                         "version": banner([str(binary), "--version"]), "runs": "native"}
+        else:
+            out[name] = {"version": "not found"}
     return out
 
 
@@ -169,7 +172,7 @@ def run(args: argparse.Namespace) -> int:
     rar = _optional(args.rar_bin)
     tools = Tools(rars=rars, rar=rar, rar_sha=sha256_file(rar) if rar else "", rar393=_optional(args.rar393_bin),
                   unrar=_optional(args.unrar_bin), rarfast=_optional(args.rarfast_bin),
-                  many=many)
+                  many=many, rar_rs=_optional(args.rar_rs_bin), unrar_rs=_optional(args.unrar_rs_bin))
     chosen = args.only.split(",") if args.only else list(ALL)
     chosen = [s for s in chosen if s not in set(filter(None, args.skip.split(",")))]
     unknown = set(chosen) - set(ALL)

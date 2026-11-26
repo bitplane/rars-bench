@@ -1,5 +1,5 @@
 
-.PHONY: fetch-rarfast release-bench release-bench-tiny
+.PHONY: fetch-rarfast fetch-rar-rs release-bench release-bench-tiny
 .PHONY: all install test test-fast coverage clean clean-results clean-cache docs sample-bin seed-text-small seed-corpora seed-corpora-large seed-edge seed-all sweep-large report copy-refbins sweep sweep-rar14 sweep-rar20 sweep-rar29 sweep-rar30 sweep-rar40 sweep-rar50 sweep-rar70 sweep-all-wine sweep-quick triage
 
 VENV := .venv
@@ -158,19 +158,32 @@ _refs/rarfast/rarfast:
 	tar -xzf _refs/rarfast/rarfast.tar.gz -C _refs/rarfast --strip-components=1
 	chmod +x $@
 
+# rar-rs, a second third-party peer (its `rar` writes RAR 5 and RAR 4, its
+# `unrar` reads). Pinned by hash like rarfast; lands in _refs/rar-rs/.
+RAR_RS_URL := https://github.com/yjdyamv/rar-rs/releases/download/v0.17.0/rar-rs-cli.linux-x64-gnu.tar.gz
+RAR_RS_SHA256 := 513aac793a6bfe338a29fe55a53b58c6c970fb3a6cd3cc12914941736ae8bd65
+fetch-rar-rs: _refs/rar-rs/rar
+
+_refs/rar-rs/rar:
+	mkdir -p _refs/rar-rs
+	curl -sSL -o _refs/rar-rs/rar-rs.tar.gz $(RAR_RS_URL)
+	echo "$(RAR_RS_SHA256)  _refs/rar-rs/rar-rs.tar.gz" | sha256sum -c -
+	tar -xzf _refs/rar-rs/rar-rs.tar.gz -C _refs/rar-rs
+	chmod +x $@ _refs/rar-rs/unrar
+
 # The release bench: one fixed scenario set, results/release-*.{json,md}.
 # RARS_BIN must name the pinned build under test. RELEASE_ARGS passes more,
 # e.g. RELEASE_ARGS="--cache /big/disk/cache --only create-rar5".
 # Corpora and wineprefixes are made only when missing: reseeding rewrites the
 # corpora (large-source-tree follows the rars checkout, so it would change the
 # input between two runs) and copy-refbins re-copies 7 GB of prefixes.
-release-bench: install fetch-rarfast
+release-bench: install fetch-rarfast fetch-rar-rs
 	@test -n "$(RARS_BIN)" || { echo "set RARS_BIN to the rars build under test"; exit 2; }
 	@test -d corpora/large-text || $(MAKE) seed-all
 	@test -d _refs/wineprefixes/winrar602 || $(MAKE) copy-refbins
 	$(RARS_BENCH) release --rars-bin "$(RARS_BIN)" $(RELEASE_ARGS)
 
 # Seconds per scenario, to prove the runner end to end; measures nothing.
-release-bench-tiny: install fetch-rarfast
+release-bench-tiny: install fetch-rarfast fetch-rar-rs
 	@test -n "$(RARS_BIN)" || { echo "set RARS_BIN to the rars build under test"; exit 2; }
 	$(RARS_BENCH) release --scale tiny --rars-bin "$(RARS_BIN)" --formats rar20,rar50 --sweep-classes logs $(RELEASE_ARGS)
